@@ -2,8 +2,7 @@
 
 박기린(`op5321` / 박기린의 기린파크)이 직접 사용하는 Claude Code용 개인 스킬 모음.
 
-> 스킬은 Claude Code에서 `~/.claude/skills/<name>/SKILL.md` 형태로 설치하면 자동 인식됩니다. 호환 프론트엔드: Claude Code, Claude.ai (일부), Copilot CLI, Gemini CLI.
-
+> 스킬은 Claude Code에서 `~/.claude/skills/<name>/SKILL.md` 형태로 설치하면 자동 인식됩니다.
 ## 수록 스킬
 
 | 스킬 | 한 줄 요약 |
