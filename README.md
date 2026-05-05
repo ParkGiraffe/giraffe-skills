@@ -10,8 +10,9 @@
 | [`blog-learn`](./blog-learn/) | 네이버 블로그 전체 글을 긁어와 `./.claude/blog-corpus/`에 캐시하고 스타일 가이드를 생성 |
 | [`blog`](./blog/) | 코퍼스를 근거로 박기린 말투의 블로그 초안 + SmartEditor HTML + 제목 후보를 생성하고, 네이버 에디터에 자동 paste |
 | [`blog-title`](./blog-title/) | 코퍼스의 카테고리별 `[]` 태그 컨벤션을 학습해 새 글의 제목 후보 5개를 추천 |
+| [`instagram-download`](./instagram-download/) | 공개 인스타그램 게시물의 사진을 로그인 없이 캐러셀 통째로 또는 N번째 한 장만 `~/Downloads`로 저장 |
 
-세 스킬은 함께 쓰도록 설계됐습니다: `blog-learn`이 코퍼스를 만들고, `blog`/`blog-title`이 그 코퍼스를 읽어 결과를 만듭니다.
+블로그 스킬 세 개(`blog-learn` / `blog` / `blog-title`)는 함께 쓰도록 설계됐습니다: `blog-learn`이 코퍼스를 만들고, `blog`/`blog-title`이 그 코퍼스를 읽어 결과를 만듭니다. `instagram-download`는 독립 유틸리티 — 블로그 글에 인스타 게시물 이미지를 가져올 때 등 단발적으로 씁니다.
 
 ## 설치
 
@@ -22,9 +23,10 @@ cd giraffe-skills
 
 # 2) 사용할 스킬을 ~/.claude/skills/ 로 심볼릭 링크
 mkdir -p ~/.claude/skills
-ln -s "$(pwd)/blog"        ~/.claude/skills/blog
-ln -s "$(pwd)/blog-learn"  ~/.claude/skills/blog-learn
-ln -s "$(pwd)/blog-title"  ~/.claude/skills/blog-title
+ln -s "$(pwd)/blog"                ~/.claude/skills/blog
+ln -s "$(pwd)/blog-learn"          ~/.claude/skills/blog-learn
+ln -s "$(pwd)/blog-title"          ~/.claude/skills/blog-title
+ln -s "$(pwd)/instagram-download"  ~/.claude/skills/instagram-download
 ```
 
 심링크 대신 복사도 가능 (`cp -R blog ~/.claude/skills/`). 단 심링크가 git pull 한 번으로 업데이트되어 편합니다.
