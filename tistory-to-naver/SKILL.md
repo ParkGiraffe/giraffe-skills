@@ -57,6 +57,21 @@ Tistory 글을 그냥 복사해서 네이버에 붙이면:
 
 핵심 트릭: 본문 청크엔 항상 `font-weight:normal; background-color:transparent;` 를 명시 — 네이버 sanitizer가 이전 헤딩 스타일을 본문 단락에 번지게 하는 버그를 막음.
 
+## 자동 footer 첨부
+
+마이그레이션 시 글 맨 밑에 다음 형식의 footer가 자동으로 붙습니다.
+
+```
+해당 글은 티스토리 블로그 <원본 URL>의 글을 마이그레이션한 글입니다.
+
+원본 작성일 : YYYY년 MM월 DD일
+```
+
+- 원본 URL은 링크(`<a href>`)로 자동 변환
+- 작성일은 Tistory `<meta property="article:published_time">` 태그에서 추출 (ISO 8601 → 한국어 날짜 포맷)
+- `published_time` 메타가 없으면 작성일 줄은 생략됨
+- 구현: `migrate_from_url.py:_build_footer_html`
+
 ## 한계
 
 - macOS 전용 (AppKit·NSPasteboard·osascript 의존)
