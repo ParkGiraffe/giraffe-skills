@@ -49,13 +49,15 @@ Tistory 글을 그냥 복사해서 네이버에 붙이면:
 
 | Tistory 마크업 | 네이버 SmartEditor HTML |
 |---|---|
-| `<h1>` ~ `<h6>` (속에 `<span style="background-color:...">` 있어도 됨) | `<p><span style="font-size:24px;background-color:#fff593;"><b>텍스트</b></span></p>` + `<p><br></p>` barrier |
+| `<h1>` ~ `<h6>` (속에 `<span style="background-color:...">` 있어도 됨) | **네이버 native 소제목 컴포넌트** — `<div class="se-component se-sectionTitle">…<span class="se-ff-nanumgothic se-fs30" style="font-size:30px;font-family:'Nanum Gothic',나눔고딕,sans-serif;color:#000000;"><b>텍스트</b></span>…</div>` + `<p><br></p>` barrier. 네이버 paste 핸들러가 `se-sectionTitle` class를 인식해 native 컴포넌트로 승격 (실측 확인). 만에 하나 sanitizer가 wrapper를 벗기더라도 inner span의 inline style 덕에 30px 검정 볼드로 시각 fallback. |
 | `<hr data-ke-type="horizontalRule">` | `<hr>` (네이버가 자동으로 SmartEditor hr 블록으로 승격) |
 | 일반 본문 `<p>`/`<div>` | `<p><span style="font-size:15px;font-weight:normal;background-color:transparent;color:#212529;">텍스트</span></p>` (헤딩 스타일 번짐 차단용 명시적 reset) |
 | `<p>&nbsp;</p>` 빈 줄 | `<p><br></p>` barrier |
 | `<img>` (Tistory CDN URL) | 로컬로 다운로드 후 별도 청크로 분리 → 클립보드에 파일 URL로 올려 페이스트 (네이버가 자동 업로드) |
 
 핵심 트릭: 본문 청크엔 항상 `font-weight:normal; background-color:transparent;` 를 명시 — 네이버 sanitizer가 이전 헤딩 스타일을 본문 단락에 번지게 하는 버그를 막음.
+
+**`/blog` 스킬과의 차이**: `/blog` 스킬(새 글 자동 작성)은 헤딩에 노란 배경(`#fff593`) + 24px 볼드를 사용 (사용자 시그니처 스타일). 이 스킬(기존 글 마이그레이션)은 native 30px 검정 볼드 소제목을 사용 — Tistory 원문이 이미 native 섹션 헤딩 구조(`<h2>`)를 갖고 있으므로 그 시멘틱을 그대로 보존.
 
 ## 자동 footer 첨부
 
