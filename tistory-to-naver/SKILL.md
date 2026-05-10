@@ -67,12 +67,16 @@ Tistory 글을 그냥 복사해서 네이버에 붙이면:
 해당 글은 티스토리 블로그 <원본 URL>의 글을 마이그레이션한 글입니다.
 
 원본 작성일 : YYYY년 MM월 DD일
+
+#태그1 #태그2 #태그3 ...
 ```
 
 - 원본 URL은 링크(`<a href>`)로 자동 변환
 - 작성일은 Tistory `<meta property="article:published_time">` 태그에서 추출 (ISO 8601 → 한국어 날짜 포맷)
 - `published_time` 메타가 없으면 작성일 줄은 생략됨
-- 구현: `migrate_from_url.py:_build_footer_html`
+- 태그는 Tistory `<div class="tags"><a rel="tag">…</a></div>` 에서 추출. 다중 단어 태그(`젤다 사당 공략`)는 내부 공백을 제거해 단일 해시태그(`#젤다사당공략`)로 변환
+- **주의**: 이 해시태그는 본문 평문일 뿐 네이버의 진짜 태그(사이드바 태그 입력란)가 아님 — 검색·태그 페이지엔 안 잡히고 시각 표시만 함. 진짜 태그는 페이스트 종료 후 사용자가 직접 사이드바에 입력해야 함
+- 구현: `migrate_from_url.py:_build_footer_html`, 태그 추출은 `fetch_post`
 
 ## 한계
 
