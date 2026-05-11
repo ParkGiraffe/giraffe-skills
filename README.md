@@ -10,6 +10,7 @@
 | [`blog-learn`](./blog-learn/) | 네이버 블로그 전체 글을 긁어와 `./.claude/blog-corpus/`에 캐시하고 스타일 가이드를 생성 |
 | [`blog`](./blog/) | 코퍼스를 근거로 박기린 말투의 블로그 초안 + SmartEditor HTML + 제목 후보를 생성하고, 네이버 에디터에 자동 paste |
 | [`blog-title`](./blog-title/) | 코퍼스의 카테고리별 `[]` 태그 컨벤션을 학습해 새 글의 제목 후보 5개를 추천 |
+| [`blog-topic-brief`](./blog-topic-brief/) | 잘 모르는 주제를 웹 검색으로 사전조사한 뒤 팩트 정리 + 코퍼스/일반 SEO 두 갈래 제목 + 태그 10~12개 브리프 |
 | [`instagram-download`](./instagram-download/) | 공개 인스타그램 게시물의 사진을 로그인 없이 캐러셀 통째로 또는 N번째 한 장만 `~/Downloads`로 저장 |
 | [`tistory-to-naver`](./tistory-to-naver/) | Tistory 게시물을 네이버 블로그 에디터로 자동 마이그레이션 (헤딩·구분선·이미지 보존, `/blog`와 동일한 SmartEditor 스타일) |
 | [`naver-to-tistory-backlink`](./naver-to-tistory-backlink/) | 네이버 블로그 글을 티스토리에 SEO 백링크용 "정리본"으로 자동 발행 (claude-in-chrome으로 티스토리 글쓰기 페이지 조작, 본문에 m.blog + PC + PostView raw 3개 백링크 박음) |
@@ -30,6 +31,7 @@ mkdir -p ~/.claude/skills
 ln -s "$(pwd)/blog"                ~/.claude/skills/blog
 ln -s "$(pwd)/blog-learn"          ~/.claude/skills/blog-learn
 ln -s "$(pwd)/blog-title"          ~/.claude/skills/blog-title
+ln -s "$(pwd)/blog-topic-brief"    ~/.claude/skills/blog-topic-brief
 ln -s "$(pwd)/instagram-download"  ~/.claude/skills/instagram-download
 ln -s "$(pwd)/tistory-to-naver"    ~/.claude/skills/tistory-to-naver
 ln -s "$(pwd)/naver-to-tistory-backlink" ~/.claude/skills/naver-to-tistory-backlink
