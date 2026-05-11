@@ -16,8 +16,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 
-HERE = pathlib.Path(__file__).parent
-PARSER = HERE / "parse_smarteditor.py"
+HERE = pathlib.Path(__file__).resolve().parent
+PARSER = HERE.parent.parent / "_lib" / "parse_smarteditor.py"
 
 
 def curl(url: str, referer: str | None = None, retries: int = 3) -> tuple[int, bytes]:
