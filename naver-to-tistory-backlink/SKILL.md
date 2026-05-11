@@ -91,7 +91,7 @@ IMG_COUNT=$(grep -c "se-image-resource" "$TMP/in.html")  # 표준 이미지 카�
 ```javascript
 // chrome MCP javascript_tool에 단발 IIFE로 주입
 (() => {
-  const TITLE = '...';
+  const TITLE = '{원본 제목} | 정리본';  // ⚠️ 반드시 " | 정리본" suffix 붙일 것
   const LOG = '...';
   const BODY = `...본문 HTML 전체...`;
 
@@ -104,6 +104,8 @@ IMG_COUNT=$(grep -c "se-image-resource" "$TMP/in.html")  # 표준 이미지 카�
 
   // 본문 — TinyMCE setContent + save + setDirty
   const ed = window.tinymce.editors[0];
+  // ⚠️ draft 방지: 먼저 기존 draft를 클리어해야 다음 /manage/post 진입 시 "저장된 글" 다이얼로그 안 뜸
+  ed.setContent(''); ed.setDirty(false);
   ed.setContent(BODY);
   ed.save();
   ed.setDirty(true);
@@ -122,6 +124,8 @@ IMG_COUNT=$(grep -c "se-image-resource" "$TMP/in.html")  # 표준 이미지 카�
     if (radio && radio.offsetParent !== null) {
       radio.click();
       setTimeout(() => {
+        // ⚠️ draft 방지: 공개 발행 클릭 직전 에디터를 클리어해 auto-save draft가 남지 않도록
+        ed.setContent(''); ed.setDirty(false);
         const pub = Array.from(document.querySelectorAll('button'))
           .find(b => b.textContent.trim() === '공개 발행');
         if (pub) pub.click();
@@ -178,6 +182,7 @@ Array.from(document.querySelectorAll('a'))
 
 ## 함정 / 주의
 
+- **"저장된 글이 있습니다" 다이얼로그** — Tistory가 /manage/post 진입 시 서버 측 auto-save draft를 감지해 confirm 다이얼로그를 띄움. 이 다이얼로그는 claude-in-chrome 확장 전체를 blocking하여 JS 실행·스크린샷 모두 타임아웃됨. 방지법: IIFE 시작 직후 `ed.setContent(''); ed.setDirty(false);` 로 기존 draft를 클리어하고, 공개 발행 클릭 직전에도 동일하게 클리어. 이미 다이얼로그가 뜬 경우 사용자가 직접 **취소**를 눌러야 한다 (computer 도구도 extension 경유라 동일하게 blocking됨).
 - **글쓰기 페이지 unsaved changes로 인한 navigation 차단** — `onbeforeunload` 가드가 navigate를 막음. 항상 **새 탭에서 새 글 작성**.
 - **TinyMCE 수정 모드 dirty flag** — `ed.save()` + `ed.setDirty(true)` 없으면 변경이 묻혀 옛 본문이 그대로 발행된다 (실측 확인).
 - **발행 다이얼로그 기본 비공개** — value="0" 라디오가 체크돼있다. 공개(value="20") 명시 클릭 필수.
