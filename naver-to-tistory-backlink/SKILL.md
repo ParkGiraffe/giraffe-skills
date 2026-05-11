@@ -80,37 +80,78 @@ IMG_COUNT=$(grep -c "se-image-resource" "$TMP/in.html")  # 표준 이미지 카�
 </ul>
 ```
 
-### 4. claude-in-chrome으로 발행
+### 4. 발행 — claude-in-chrome 단발 IIFE
 
-진행 전 사용자에게 한 번 안내: "발행 다이얼로그가 뜨면 공개 라디오를 자동 클릭 후 공개 발행합니다. 중단하려면 지금 말씀하세요."
+사용자 데일리 Chrome에 이미 attach된 `claude-in-chrome` MCP를 그대로 사용 → 사용자 Tistory 로그인 세션 재활용 (별도 로그인 없음). 전체 시퀀스를 **2번의 batch round**로 압축 (원래 7~8번 → 2번).
+
+#### round 1: navigate + setContent + 완료 + 자동 다이얼로그 처리
+
+`browser_batch`에 navigate + wait + javascript_tool 한 번에 묶음. 단발 IIFE 안에서 setContent → 완료 클릭 → setTimeout chain으로 공개 라디오 + 공개 발행을 자동 처리.
 
 ```javascript
-// (a) 새 탭에서 글쓰기 페이지 진입 — 기존 탭에 unsaved changes가 있으면 onbeforeunload로 막힘
-navigate("https://arnopark.tistory.com/manage/post", <newTabId>)
-// → URL이 /manage/newpost/?type=post&... 로 redirect되는 것 확인
+// chrome MCP javascript_tool에 단발 IIFE로 주입
+(() => {
+  const TITLE = '...';
+  const LOG = '...';
+  const BODY = `...본문 HTML 전체...`;
 
-// (b) 제목 — <textarea id="post-title-inp"> 에 native setter로 주입 (KEditor가 React-like 추적 가능성)
-const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-setter.call(document.getElementById('post-title-inp'), TITLE);
-// input/change 이벤트 dispatchEvent도 함께
+  // 제목 — textarea native setter 필수 (KEditor가 React-like 추적 가능)
+  const t = document.getElementById('post-title-inp');
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(t, TITLE);
+  t.dispatchEvent(new Event('input', {bubbles: true}));
+  t.dispatchEvent(new Event('change', {bubbles: true}));
 
-// (c) 본문 — TinyMCE setContent + save + setDirty
-const ed = window.tinymce.editors[0];
-ed.setContent(bodyHtml);
-ed.save();
-ed.setDirty(true);
+  // 본문 — TinyMCE setContent + save + setDirty
+  const ed = window.tinymce.editors[0];
+  ed.setContent(BODY);
+  ed.save();
+  ed.setDirty(true);
 
-// (d) "완료" 버튼 → 발행 다이얼로그
-Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === '완료').click()
+  // 완료 클릭 → 발행 다이얼로그 등장
+  Array.from(document.querySelectorAll('button'))
+    .find(b => b.textContent.trim() === '완료').click();
 
-// (e) 공개 라디오 (value="20") — 기본은 비공개(value="0")가 체크돼있음. 명시 클릭 필수
-// ⚠️ document.querySelectorAll('input[type=radio]')[0] 은 NG — 페이지엔 hidden radio가 섞여 있어
-//     index 기반 selector가 보이지 않는 라디오를 잡는 경우가 있음. value 직접 타깃 필수.
-document.querySelector('input[type=radio][value="20"]').click()
+  // 다이얼로그 등장 polling — 보이는 공개 라디오 잡히면 클릭 후 0.4초 뒤 "공개 발행"
+  // ⚠️ document.querySelectorAll('input[type=radio]')[0] 은 NG — 페이지엔 hidden radio가
+  //     섞여 있어 index 기반 selector가 보이지 않는 라디오를 잡는 경우가 있음.
+  //     반드시 input[type=radio][value="20"] 로 value 직접 타깃.
+  const tryDialog = (tries) => {
+    if (tries > 50) return;
+    const radio = document.querySelector('input[type=radio][value="20"]');
+    if (radio && radio.offsetParent !== null) {
+      radio.click();
+      setTimeout(() => {
+        const pub = Array.from(document.querySelectorAll('button'))
+          .find(b => b.textContent.trim() === '공개 발행');
+        if (pub) pub.click();
+      }, 400);
+    } else {
+      setTimeout(() => tryDialog(tries + 1), 200);
+    }
+  };
+  setTimeout(() => tryDialog(0), 500);
 
-// (f) "공개 발행" 버튼 클릭 (공개 라디오 체크 후 라벨이 "비공개 저장" → "공개 발행"으로 바뀜)
-Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === '공개 발행').click()
+  return {queued: true, bodyLen: ed.getContent().length};
+})()
 ```
+
+`browser_batch`는 `[navigate(/manage/post), wait(4s), javascript_tool(IIFE)]` 세 action을 한 round에. 페이지 navigate가 IIFE 컨텍스트를 깨므로 발행 후 redirect 직전까지가 한 round 한계.
+
+**⚠️ 인터럽트 불가**: IIFE는 ~1초 안에 발행 클릭까지 끝나므로, 사용자가 작성 중간에 "다른 글로 해줘" 같은 중단 요청을 해도 이미 발행됐을 가능성이 큼. 발행 직전 사용자 확인을 받든가, 미리 글 선정 단계에서 확정을 받아둘 것.
+
+#### round 2: redirect 후 새 entry URL 추출
+
+```javascript
+// browser_batch: [wait(4s), javascript_tool(extract)]
+(() => {
+  const a = Array.from(document.querySelectorAll('a'))
+    .filter(x => /arnopark\.tistory\.com\/\d+$/.test(x.href))[0];
+  return {path: location.pathname, url: a ? a.href : null};
+})()
+```
+
+`path === '/manage/posts/'` + `url`이 새 entry이면 성공.
 
 ### 5. 발행 후 검증
 ```javascript
@@ -163,7 +204,7 @@ Array.from(document.querySelectorAll('a'))
 ## 의존 / 공유 자원
 
 - `<repo>/_lib/parse_smarteditor.py` — 네이버 SmartEditor HTML → 마크다운 (`blog-learn`과 공유)
-- `claude-in-chrome` MCP — Chrome 자동화
+- `claude-in-chrome` MCP — Chrome 자동화 (사용자 데일리 세션 attach. 별도 로그인 X)
 - `curl` — 네이버 도메인 우회 fetch
 
 ## 관련 스킬
