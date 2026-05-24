@@ -14,8 +14,9 @@
 | [`instagram-download`](./instagram-download/) | 공개 인스타그램 게시물의 사진을 로그인 없이 캐러셀 통째로 또는 N번째 한 장만 `~/Downloads`로 저장 |
 | [`tistory-to-naver`](./tistory-to-naver/) | Tistory 게시물을 네이버 블로그 에디터로 자동 마이그레이션 (헤딩·구분선·이미지 보존, `/blog`와 동일한 SmartEditor 스타일) |
 | [`naver-to-tistory-backlink`](./naver-to-tistory-backlink/) | 네이버 블로그 글을 티스토리에 SEO 백링크용 "정리본"으로 자동 발행 (claude-in-chrome으로 티스토리 글쓰기 페이지 조작, 본문에 m.blog + PC + PostView raw 3개 백링크 박음) |
+| [`face-anonymizer`](./face-anonymizer/) | 폴더 안 사진 속 얼굴을 YuNet으로 자동 검출해 회색/검정/흰색 원 또는 모자이크로 일괄 익명화 (원본 보존, 별도 출력 폴더, 얼굴 없는 사진도 포함) |
 
-블로그 스킬 세 개(`blog-learn` / `blog` / `blog-title`)는 함께 쓰도록 설계됐습니다: `blog-learn`이 코퍼스를 만들고, `blog`/`blog-title`이 그 코퍼스를 읽어 결과를 만듭니다. `instagram-download`와 `tistory-to-naver`, `naver-to-tistory-backlink`는 독립 유틸리티 — 블로그 글에 인스타 게시물 이미지를 가져오거나, 기존 Tistory 글을 네이버로 옮기거나, 네이버 글을 티스토리에 미러링해 구글 검색 노출을 노릴 때 단발적으로 씁니다.
+블로그 스킬 세 개(`blog-learn` / `blog` / `blog-title`)는 함께 쓰도록 설계됐습니다: `blog-learn`이 코퍼스를 만들고, `blog`/`blog-title`이 그 코퍼스를 읽어 결과를 만듭니다. `instagram-download`와 `tistory-to-naver`, `naver-to-tistory-backlink`, `face-anonymizer`는 독립 유틸리티 — 블로그 글에 인스타 게시물 이미지를 가져오거나, 기존 Tistory 글을 네이버로 옮기거나, 네이버 글을 티스토리에 미러링해 구글 검색 노출을 노리거나, 행사 사진을 올리기 전 행인 얼굴을 가릴 때 단발적으로 씁니다.
 
 리포 상위 `_lib/` 폴더에는 여러 스킬이 공유하는 모듈이 있습니다 (현재: `parse_smarteditor.py` — 네이버 SmartEditor HTML을 마크다운으로 변환. `blog-learn`과 `naver-to-tistory-backlink`가 공유).
 
@@ -35,6 +36,7 @@ ln -s "$(pwd)/blog-topic-brief"    ~/.claude/skills/blog-topic-brief
 ln -s "$(pwd)/instagram-download"  ~/.claude/skills/instagram-download
 ln -s "$(pwd)/tistory-to-naver"    ~/.claude/skills/tistory-to-naver
 ln -s "$(pwd)/naver-to-tistory-backlink" ~/.claude/skills/naver-to-tistory-backlink
+ln -s "$(pwd)/face-anonymizer"     ~/.claude/skills/face-anonymizer
 ```
 
 심링크 대신 복사도 가능 (`cp -R blog ~/.claude/skills/`). 단 심링크가 git pull 한 번으로 업데이트되어 편합니다.
