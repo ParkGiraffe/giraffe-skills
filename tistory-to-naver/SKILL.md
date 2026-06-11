@@ -23,25 +23,41 @@ Tistory 글을 그냥 복사해서 네이버에 붙이면:
   (없으면 `git clone https://github.com/ParkGiraffe/tistory-to-naver-blog.git` 으로 클론)
 - 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에 터미널(또는 iTerm) 체크
   (Auto 모드의 Cmd+V 자동 전송 권한)
+- Chrome 메뉴 바 → 보기 → 개발자 → "Apple Events의 자바스크립트 허용" 체크
+  (코드블록 Pass 2의 osascript in-page JS 주입 권한. 코드블록 없는 글이면 불필요)
 
-## 실행 절차
+## 실행 절차 (전 단계 Claude 자동 — 사용자 액션 0회)
 
-1. 사용자에게 네이버 글쓰기 페이지 열고 본문 영역 클릭하라고 안내:
-   ```
-   https://blog.naver.com/<userid>/postwrite
-   ```
+**디폴트는 osascript 완전 자동 오케스트레이션.** 사용자에게 "창 열고 클릭하세요" 류의
+수동 단계를 시키지 말 것. 시작 전 "약 1~2분간 키보드·마우스를 건드리지 마세요"만 고지.
+(공통 기법 상세는 `blog/SKILL.md`의 "8-1. osascript 자동 오케스트레이션" 참조)
 
-2. 사용자 확인 후 다음 명령 실행:
+1. Claude: osascript로 `https://blog.naver.com/<userid>/postwrite` 탭 확보
+   (기존 탭 URL 탐색 → 없으면 열기). 임시저장 다이얼로그 뜨면 JS로 `취소` 클릭.
+   탭 인덱스는 수시로 바뀌므로 매 단계 URL로 재탐색.
+
+2. Claude: 본문 단락 좌표를 JS로 계산해 Quartz CGEvent 실제 클릭 → 포커스 확보 후 실행:
    ```bash
    cd ~/Desktop/Project/personal/tistory-to-naver-blog
    printf "1\n\n" | python3 run_migration.py '<TISTORY_URL>'
    ```
    - `printf "1\n\n"` → Auto 모드 자동 선택 + 종료 시 Enter
-   - 3초 카운트다운 후 자동 페이스트 시작
+   - 3초 카운트다운은 포커스가 이미 잡혀 있으므로 그냥 지나감
 
-3. 사용자에게 "3초 안에 네이버 창으로 포커스 옮기세요" 라고 안내
+3. 글에 코드블록(`<pre>`)이 있으면 Pass 1이 `[[CODE-n]]` placeholder 를 본문에 남기고
+   원본 코드를 `/tmp/naver_code_blocks.json` 에 저장함. 페이스트 종료 후 Claude가 실행:
+   ```bash
+   cd ~/Desktop/Project/personal/tistory-to-naver-blog
+   python3 inject_code_blocks.py
+   ```
+   → placeholder 자리에 native SmartEditor 코드 컴포넌트(`se-code`)가 삽입되고
+   Prism 하이라이팅까지 자동 적용됨 (Quartz CGEvent 트리플클릭·Backspace +
+   in-page JS 툴바 클릭·textarea 주입).
 
-4. 페이스트 종료 후 사용자가 에디터에서 결과 확인
+4. Claude: 원글 제목을 `pbcopy` → CGEvent로 제목칸 클릭 → Cmd+V로 자동 입력.
+
+5. 사용자: 에디터에서 결과 검토 (코드블록 언어 표기는 기본 javascript — 다른 언어면
+   컴포넌트 클릭 후 수동 변경). **발행 버튼은 사용자가 직접 클릭** (발행은 자동화하지 않음).
 
 ## 변환 규칙 (`migrate_from_url.py:split_content_into_chunks`)
 
@@ -54,10 +70,13 @@ Tistory 글을 그냥 복사해서 네이버에 붙이면:
 | 일반 본문 `<p>`/`<div>` | `<p><span style="font-size:15px;font-weight:normal;background-color:transparent;color:#212529;">텍스트</span></p>` (헤딩 스타일 번짐 차단용 명시적 reset) |
 | `<p>&nbsp;</p>` 빈 줄 | `<p><br></p>` barrier |
 | `<img>` (Tistory CDN URL) | 로컬로 다운로드 후 별도 청크로 분리 → 클립보드에 파일 URL로 올려 페이스트 (네이버가 자동 업로드) |
+| `<pre>` 코드블록 | Pass 1: `[[CODE-n]]` placeholder 본문 단락 + `/tmp/naver_code_blocks.json` 사이드카 → Pass 2(`inject_code_blocks.py`): native `se-code` 컴포넌트로 치환 |
 
 핵심 트릭: 본문 청크엔 항상 `font-weight:normal; background-color:transparent;` 를 명시 — 네이버 sanitizer가 이전 헤딩 스타일을 본문 단락에 번지게 하는 버그를 막음.
 
-**왜 native 소제목 컴포넌트를 안 쓰는가**: 네이버 SmartEditor의 paste 핸들러는 chromium의 `source-rfh-token` + 자체 `data-input-buffer` 토큰 둘 다 매칭돼야만 메모리에서 원본 컴포넌트를 복원합니다. 외부 매크로(터미널 Python AppKit)에서 만든 클립보드엔 이 토큰이 없으므로 어떤 SmartEditor 마크업을 박아도 **모두 본문 컴포넌트로 normalize됨**. 실측으로 정답 마크업을 한 자도 안 바꾸고 페이스트해도 본문 15px 볼드로 떨어짐을 확인. native 컴포넌트 inject는 chrome 확장·Playwright·CDP attach 같은 in-process 자동화로만 가능 — 매크로 한 줄에 비해 무거우므로 시각 표시(노란 배경)만 유지하기로 결정.
+**왜 native 소제목 컴포넌트를 안 쓰는가**: 네이버 SmartEditor의 paste 핸들러는 chromium의 `source-rfh-token` + 자체 `data-input-buffer` 토큰 둘 다 매칭돼야만 메모리에서 원본 컴포넌트를 복원합니다. 외부 매크로(터미널 Python AppKit)에서 만든 클립보드엔 이 토큰이 없으므로 어떤 SmartEditor 마크업을 박아도 **모두 본문 컴포넌트로 normalize됨**. 실측으로 정답 마크업을 한 자도 안 바꾸고 페이스트해도 본문 15px 볼드로 떨어짐을 확인. native 컴포넌트 inject는 in-process 자동화로만 가능 — 소제목은 시각 표시(노란 배경)로 충분해서 매크로 paste 를 유지.
+
+**단, 코드블록은 in-process 주입이 됨** (2026-06-11 실측): osascript `execute javascript` (Chrome "Apple Events의 자바스크립트 허용" 필요)로 페이지 안에서 툴바 `button[data-name=code]` 를 클릭하면 에디터 자신의 핸들러가 정상 컴포넌트를 만들고, `.se-code-source-editor` textarea 에 native value setter + `input` 이벤트로 코드를 넣으면 모델이 수용함. 단 SE 는 합성(synthetic) paste/insertText 를 `isTrusted` 로 거부하므로, 캐럿 위치 잡기(트리플클릭)와 placeholder 삭제(Backspace)는 Quartz CGEvent 실제 입력으로 쏴야 함. 이 조합이 `inject_code_blocks.py` (Pass 2). 같은 원리로 소제목도 native 화 가능하지만 현재는 코드블록만 적용.
 
 ## 자동 footer 첨부
 
@@ -82,13 +101,16 @@ Tistory 글을 그냥 복사해서 네이버에 붙이면:
 
 - macOS 전용 (AppKit·NSPasteboard·osascript 의존)
 - Tistory 외 다른 블로그 플랫폼은 지원 안 함 (셀렉터가 `.tt_article_useless_p_margin`, `.entry-content`, `<article>` 순)
-- 동영상·iframe·코드블록은 평문화될 가능성 (현재 스크립트 미대응)
+- 동영상·iframe은 평문화될 가능성 (현재 스크립트 미대응)
+- 코드블록 textarea 는 `maxlength=5000` — 5천 자 초과 코드는 잘림 (분할 필요)
+- Pass 2 는 화면 좌표 기반 실제 클릭을 쓰므로 실행 중 다른 창을 띄우거나 입력하면 오작동
 - 네이버 sanitizer 정책이 바뀌면 본문 스타일 번짐이 재발할 수 있음 — `paste_to_naver.py`의 `BODY_SPAN_STYLE`/`HEADING_SPAN_STYLE`을 같이 갱신할 것
 
 ## 의존 도구
 - `ParkGiraffe/tistory-to-naver-blog` (외부 리포)
-  - `run_migration.py`, `migrate_from_url.py`
-  - 패키지: `requests`, `beautifulsoup4`, `pyobjc-framework-Cocoa` (스크립트가 자동 설치)
+  - `run_migration.py`, `migrate_from_url.py`, `inject_code_blocks.py` (Pass 2)
+  - 패키지: `requests`, `beautifulsoup4`, `pyobjc-framework-Cocoa` (스크립트가 자동 설치),
+    `pyobjc-framework-Quartz` (Pass 2 CGEvent 용)
 
 ## 관련 스킬
 - `/blog` — 네이버 블로그 새 글 자동 작성 + 페이스트 (`paste_to_naver.py` 정본 보유)
