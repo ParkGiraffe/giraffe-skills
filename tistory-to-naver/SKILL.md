@@ -26,38 +26,40 @@ Tistory 글을 그냥 복사해서 네이버에 붙이면:
 - Chrome 메뉴 바 → 보기 → 개발자 → "Apple Events의 자바스크립트 허용" 체크
   (코드블록 Pass 2의 osascript in-page JS 주입 권한. 코드블록 없는 글이면 불필요)
 
-## 실행 절차 (전 단계 Claude 자동 — 사용자 액션 0회)
+## 실행 절차 (단일 명령 — 사용자 액션 0회)
 
-**디폴트는 osascript 완전 자동 오케스트레이션.** 사용자에게 "창 열고 클릭하세요" 류의
-수동 단계를 시키지 말 것. 시작 전 "약 1~2분간 키보드·마우스를 건드리지 마세요"만 고지.
-(공통 기법 상세는 `blog/SKILL.md`의 "8-1. osascript 자동 오케스트레이션" 참조)
+**디폴트는 `migrate.py` 원샷 파이프라인** (2026-06-12 도입, 908 기준 72초 완주).
+시작 전 "약 1~2분간 키보드·마우스를 건드리지 마세요"만 고지하고 실행:
 
-1. Claude: osascript로 `https://blog.naver.com/<userid>/postwrite` 탭 확보
-   (기존 탭 URL 탐색 → 없으면 열기). 임시저장 다이얼로그 뜨면 JS로 `취소` 클릭.
-   탭 인덱스는 수시로 바뀌므로 매 단계 URL로 재탐색.
+```bash
+cd ~/Desktop/Project/personal/tistory-to-naver-blog
+python3 migrate.py '<TISTORY_URL>' [--clear]
+```
 
-2. Claude: 본문 단락 좌표를 JS로 계산해 Quartz CGEvent 실제 클릭 → 포커스 확보 후 실행:
-   ```bash
-   cd ~/Desktop/Project/personal/tistory-to-naver-blog
-   printf "1\n\n" | python3 run_migration.py '<TISTORY_URL>'
-   ```
-   - `printf "1\n\n"` → Auto 모드 자동 선택 + 종료 시 Enter
-   - 3초 카운트다운은 포커스가 이미 잡혀 있으므로 그냥 지나감
+내부 6단계 (전부 자동):
+1. Tistory fetch + 이미지 병렬 다운로드(6스레드) + 청크 분할
+2. postwrite 탭 확보(URL 재탐색, 없으면 열기) + 임시저장 다이얼로그 JS 취소
+   + `hasFocus` 폴링으로 창 포커스 보장. 에디터가 비어있지 않으면 ABORT
+   (`--clear` 줘야 Cmd+A+Backspace로 초기화 — 초안 보호)
+3. 제목 페이스트 (트리플클릭 선택→교체 방식이라 재시도해도 중복 없음.
+   검증 비교는 NBSP(\xa0) 정규화 필수 — SE가 공백을 NBSP로 렌더링함)
+4. 본문 청크 페이스트 + 청크별 등록 검증(0.2초 폴링, 3회 재시도) —
+   이미지는 `se-image` 수, 텍스트는 `.se-text p` 수 증가로 확인
+   (SE가 연속 텍스트를 한 컴포넌트로 합치므로 컴포넌트 수는 부정확)
+5. 코드블록 Pass: `[[CODE-n]]` placeholder → native `se-code` 주입
+   (`inject_code_blocks.py` 자동 호출)
+6. 스타일 패스 (합성 JS만, 실입력 불필요): 모든 구분선 → `line3`
+   (가운데 꺾임) + 가운데 정렬, 모든 사진 → 가운데 정렬.
+   원리: 컴포넌트 합성 클릭 선택 → ~500ms 대기(property toolbar 렌더) →
+   `button[data-name=horizontal-line-layout][data-value=line3]` /
+   `button[data-name=align][data-value=center]` 클릭
 
-3. 글에 코드블록(`<pre>`)이 있으면 Pass 1이 `[[CODE-n]]` placeholder 를 본문에 남기고
-   원본 코드를 `/tmp/naver_code_blocks.json` 에 저장함. 페이스트 종료 후 Claude가 실행:
-   ```bash
-   cd ~/Desktop/Project/personal/tistory-to-naver-blog
-   python3 inject_code_blocks.py
-   ```
-   → placeholder 자리에 native SmartEditor 코드 컴포넌트(`se-code`)가 삽입되고
-   Prism 하이라이팅까지 자동 적용됨 (Quartz CGEvent 트리플클릭·Backspace +
-   in-page JS 툴바 클릭·textarea 주입).
+종료 시 소요 시간 + 컴포넌트 카운트 + 잔여 marker 감사가 출력됨.
+사용자는 에디터에서 결과 검토 후 **발행 버튼만 직접 클릭** (발행은 자동화하지 않음).
+코드블록 언어 표기는 기본 javascript — 다른 언어면 수동 변경.
 
-4. Claude: 원글 제목을 `pbcopy` → CGEvent로 제목칸 클릭 → Cmd+V로 자동 입력.
-
-5. 사용자: 에디터에서 결과 검토 (코드블록 언어 표기는 기본 javascript — 다른 언어면
-   컴포넌트 클릭 후 수동 변경). **발행 버튼은 사용자가 직접 클릭** (발행은 자동화하지 않음).
+레거시 단계별 실행(`run_migration.py` + `inject_code_blocks.py`)도 유지되며
+디버깅 시에만 사용.
 
 ## 변환 규칙 (`migrate_from_url.py:split_content_into_chunks`)
 
