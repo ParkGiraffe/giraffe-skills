@@ -96,19 +96,34 @@ def _html_escape(s: str) -> str:
 #   2. After every heading we emit an empty <p><br></p> as a style barrier
 #      paragraph (common WYSIWYG trick).
 HEADING_SPAN_STYLE = "font-size:24px;background-color:#fff593;"
+# 소제목(### , level>=3): 배경 없이 본문보다 큰 볼드. 노랑 제목보다 살짝 작게.
+SUBHEADING_SPAN_STYLE = (
+    "font-size:19px;background-color:transparent;color:#212529;"
+)
 BODY_SPAN_STYLE = (
     "font-size:15px;font-weight:normal;background-color:transparent;"
     "color:#212529;"
 )
 BARRIER_HTML = '<p><br></p>'
 
+# 사용자 평소 블로그 여백 규칙 (2026-06-16 지시):
+#   제목(세션, ##) 위 5줄 / 소제목(###) 위 3줄 /
+#   [사진 + 바로 아래 설명글] 묶음 아래 4줄.
+# 핵심: 사진과 그 캡션(본문 단락)은 딱 붙인다(여백 0). 여백은 캡션(본문 단락)
+#   '아래'에만 둔다 = 다음 사진/요소 앞에 옴. 사진 바로 뒤에는 여백을 넣지 않음.
+# 빈 줄은 <p><br></p> 빈 단락으로 표현. 인접한 여백은 합산하지 않고 max로 둠.
+BLANK_P = '<p><br></p>'
+SPACE_BEFORE_SESSION = 5
+SPACE_BEFORE_SUB = 3
+SPACE_AFTER_TEXT = 4   # 본문 단락(=사진 캡션) 아래 4줄. 사진 바로 뒤엔 안 넣음.
 
-def heading_html(text: str) -> str:
+
+def heading_html(text: str, level: int = 2) -> str:
+    # 제목 뒤 trailing 빈 줄(barrier) 없음 — 소제목 바로 밑에 사진/글을 딱 붙이기
+    # 위함. 스타일 번짐은 body_html의 명시적 reset span으로 이미 차단됨.
     t = _html_escape(text)
-    return (
-        f'<p><span style="{HEADING_SPAN_STYLE}"><b>{t}</b></span></p>'
-        + BARRIER_HTML
-    )
+    style = SUBHEADING_SPAN_STYLE if level >= 3 else HEADING_SPAN_STYLE
+    return f'<p><span style="{style}"><b>{t}</b></span></p>'
 
 
 def body_html(text: str) -> str:
@@ -126,30 +141,19 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
     body = strip_frontmatter(md_text)
     lines = body.splitlines()
     files = list_images(images_dir)
-    chunks: list[dict] = []
-    html_buf: list[str] = []
+
+    # ---- 1) 토큰화 ----
+    tokens: list[tuple] = []   # ('hr',) | ('h',level,text) | ('img',path) | ('p',text)
     para: list[str] = []
-    auto_idx = 0
 
     def flush_para():
-        nonlocal para
         if para:
             text = " ".join(l.strip() for l in para if l.strip())
             if text:
-                html_buf.append(body_html(text))
-        para = []
+                tokens.append(("p", text))
+        para.clear()
 
-    def flush_html():
-        nonlocal html_buf
-        if html_buf:
-            chunks.append({"type": "html", "content": "".join(html_buf)})
-            html_buf = []
-
-    def push_image(p: pathlib.Path):
-        flush_para()
-        flush_html()
-        chunks.append({"type": "image", "path": str(p.resolve())})
-
+    auto_idx = 0
     for raw in lines:
         line = raw.rstrip()
         if not line.strip():
@@ -157,7 +161,7 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             continue
         if HR_RE.match(line):
             flush_para()
-            html_buf.append("<hr>")
+            tokens.append(("hr",))
             continue
         h = HEADING_RE.match(line)
         if h:
@@ -165,19 +169,16 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             level = len(h.group(1))
             text = h.group(2).strip()
             if level == 1:
-                # Skip post title entirely — it goes in Naver's dedicated
-                # title input field above the body, not in the body itself.
-                # The caller prints the title separately so the user can
-                # paste it manually into that field.
+                # 글 제목은 본문에 안 넣음 (네이버 제목칸으로 따로)
                 continue
-            html_buf.append(heading_html(text))
+            tokens.append(("h", level, text))
             continue
         img = IMAGE_RE.match(line)
         if img:
             flush_para()
             ref = img.group(2)
             if ref.startswith(("http://", "https://", "file://")):
-                html_buf.append(body_html(f"[원격 이미지: {ref}]"))
+                tokens.append(("p", f"[원격 이미지: {ref}]"))
                 continue
             matched = None
             for p in files:
@@ -185,22 +186,85 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
                     matched = p
                     break
             if matched:
-                push_image(matched)
+                tokens.append(("img", str(matched.resolve())))
             else:
-                html_buf.append(body_html(f"[이미지 누락: {ref}]"))
+                tokens.append(("p", f"[이미지 누락: {ref}]"))
             continue
         ph = PLACEHOLDER_RE.match(line)
         if ph:
             flush_para()
             if auto_idx < len(files):
-                push_image(files[auto_idx])
+                tokens.append(("img", str(files[auto_idx].resolve())))
                 auto_idx += 1
             else:
-                html_buf.append(body_html(f"[스크린샷: {ph.group(1).strip()}]"))
+                tokens.append(("p", f"[스크린샷: {ph.group(1).strip()}]"))
             continue
         para.append(line)
     flush_para()
-    flush_html()
+
+    # ---- 2) 여백 규칙 적용해 element 나열 ----
+    elements: list[tuple] = []   # ('html', s) | ('img', path)
+
+    def blanks(n):
+        if n > 0:
+            elements.append(("html", BLANK_P * n))
+
+    prev_type = None        # 직전 토큰 종류
+    prev_is_caption = False  # 직전 토큰이 캡션(사진 바로 뒤 문단)인지
+    for i, tok in enumerate(tokens):
+        typ = tok[0]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        is_caption = (typ == "p" and prev_type == "img")
+
+        if typ == "hr":
+            # 구분선 위 여백. 다음이 세션제목이면 그 5줄을 '구분선 위'에 둔다.
+            n = SPACE_BEFORE_SESSION if (nxt and nxt[0] == "h" and nxt[1] == 2) else SPACE_AFTER_TEXT
+            blanks(n)
+            elements.append(("html", "<hr>"))
+        elif typ == "h":
+            level = tok[1]
+            if prev_type == "hr":
+                n = 0  # 구분선↔제목 딱 붙임 (여백은 이미 구분선 위에)
+            elif prev_type == "h":
+                n = 1  # 세션(노랑) 제목 바로 밑 첫 소제목은 한 칸만
+            else:
+                n = SPACE_BEFORE_SESSION if level == 2 else SPACE_BEFORE_SUB
+                if prev_type in ("p", "img"):   # 직전 블록(설명글/사진) 끝 -> 경계 여백
+                    n = max(n, SPACE_AFTER_TEXT)
+            blanks(n)
+            elements.append(("html", heading_html(tok[2], level)))
+        elif typ == "img":
+            # caption-after(사진 먼저, 밑에 설명글). 직전이 설명글이면 [사진+설명] 블록이
+            # 끝난 것이므로 4줄 띄우고 새 사진. 소제목/구분선/앞 사진 뒤엔 딱 붙임.
+            n = SPACE_AFTER_TEXT if prev_type == "p" else 0
+            blanks(n)
+            elements.append(("img", tok[1]))
+        else:  # 'p' (사진 아래 설명글)
+            if prev_type in ("img", "h"):
+                n = 0                  # 설명글은 사진/소제목 바로 밑에 딱 붙임
+            elif prev_type == "p":
+                n = 1                  # 연속 문단 사이 1줄
+            else:
+                n = 0
+            blanks(n)
+            elements.append(("html", body_html(tok[1])))
+
+        prev_type = typ
+        prev_is_caption = is_caption
+
+    # ---- 3) 연속 html을 한 chunk로 합치기 ----
+    chunks: list[dict] = []
+    buf: list[str] = []
+    for kind, val in elements:
+        if kind == "html":
+            buf.append(val)
+        else:
+            if buf:
+                chunks.append({"type": "html", "content": "".join(buf)})
+                buf = []
+            chunks.append({"type": "image", "path": val})
+    if buf:
+        chunks.append({"type": "html", "content": "".join(buf)})
     return chunks
 
 
