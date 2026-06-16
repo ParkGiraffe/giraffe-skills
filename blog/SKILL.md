@@ -1,14 +1,19 @@
 ---
 name: blog
-description: Generate a Naver blog draft (script + SmartEditor-compatible HTML + title candidates + hashtags + category) for the user's blog "박기린의 기린파크" (op5321), in the user's learned voice. Use when the user says "/blog <topic>", "블로그 글 써줘", "네이버 블로그 초안 만들어줘", or asks to draft/write a new blog post. Requires that /blog-learn has already populated ./.claude/blog-corpus/. NEVER use emojis anywhere in the output — the user explicitly forbids them in their writing.
+description: Generate a Naver blog draft (script + SmartEditor-compatible HTML + title candidates + hashtags + category) for the user's blog "박기린의 기린파크" (op5321), in a clear analytical style (명료한 분석글, ~입니다 체) — NOT a mimicked personal voice. Use when the user says "/blog <topic>", "블로그 글 써줘", "네이버 블로그 초안 만들어줘", or asks to draft/write a new blog post. The blog corpus (/blog-learn) must NOT be used to imitate the user's writing voice; it is at most a reference for category names. NEVER use emojis anywhere in the output — the user explicitly forbids them in their writing.
 ---
 
 # blog — 대본 + SmartEditor HTML 생성
 
-주제 한 줄을 받아 박기린님의 학습된 말투로 블로그 초안을 만듭니다.
+주제 한 줄(또는 정리 노트)을 받아 **명료한 분석글(~입니다 체)**로 블로그 초안을 만듭니다.
+
+## 보이스 규칙 (최우선)
+- **코퍼스 말투 모방 금지.** 과거에 코퍼스로 사용자의 말투를 흉내냈으나, 애매하게 따라하면 안 쓰니만 못하다는 사용자 피드백(2026-06-16)으로 폐기. `style-guide.md`의 종결어미·호흡·말투 패턴은 더 이상 따르지 않음.
+- **기본 보이스 = 명료한 분석글.** 군더더기 없는 설명체, 정보 전달 우선. 모든 문장은 **`~입니다`/`~합니다` 체로 통일** (구어체 종결어미·감탄사·이모티콘 금지).
+- 사용자가 다른 톤을 명시하면 그 지시를 우선.
 
 ## 전제
-- `./.claude/blog-corpus/posts/*.md`와 `style-guide.md`가 이미 존재해야 함. 없으면 먼저 `/blog-learn`을 돌리라고 안내.
+- 코퍼스(`./.claude/blog-corpus/`)는 **필수 아님**. 있으면 카테고리명 참조용으로만 쓰고, **말투/문체 학습에는 절대 쓰지 않음**. 없어도 작성 진행.
 
 ## 입력
 ```
@@ -19,24 +24,17 @@ description: Generate a Naver blog draft (script + SmartEditor-compatible HTML +
 
 ## 절차
 
-### 1. 유사글 검색
-```bash
-python3 ~/.claude/skills/blog/scripts/find_similar.py .claude/blog-corpus "<주제>" [--category ...] --n 3
-```
-출력 JSON에서 상위 3편의 `path`를 읽어 few-shot 샘플로 사용.
+### 1. 소스 수집
+- 주제 문자열 또는 사용자가 정리해 둔 노트(Notion 페이지 등). 노트가 있으면 그 내용·사진·섹션 구분을 출처로 삼아 재구성.
+- (선택) 카테고리명이 필요하면 `index.json`에서 실제 카테고리 목록만 확인. **코퍼스 본문/style-guide로 말투를 학습하지 않음.**
 
-### 2. 컨텍스트 수집
-- `./.claude/blog-corpus/style-guide.md` 전체
-- 위에서 찾은 유사글 3편의 `posts/*.md` 파일 내용
-- 주제 문자열
-
-### 3. 대본 작성
-이 세 가지를 근거로 대본을 직접 작성. 작성 시:
+### 2. 대본 작성
+명료한 분석글로 직접 작성. 작성 시:
 - **이모지 절대 금지** (한 개도 쓰지 말 것)
-- 블로그 정체성 유지: "닌텐도, 스팀, 모바일가챠 게임을 두루두루 사랑하는 개발자" 관점
-- 스타일 가이드에 기록된 종결어미·호흡·단락 패턴을 그대로 따를 것
-- 유사글 3편의 구성(도입-소제목-본론-마무리 흐름)을 참고하되 주제에 맞게 재구성
+- **모든 문장 `~입니다`/`~합니다` 체로 통일.** 구어체·감탄사·말끝 흐림 금지.
+- 정보 전달과 논리적 흐름 우선. 한 섹션 = 한 주제. 불필요한 수식어·감상 군더더기 제거.
 - 구조: `# {제목}` → 도입 1~2단락 → `---` 또는 `## {소제목}` 반복 → 마무리
+- (이하 단계 번호는 기존 4~8을 그대로 따른다. SmartEditor HTML/메타/업로드 절차는 변경 없음.)
 - 이미지 자리는 `[스크린샷: 설명]` 또는 `![](경로)`로 마킹. `--images` 폴더가 있으면 파일명 힌트를 주고, 없으면 placeholder만.
 - `--length`: short ≈ 600~800자, normal ≈ 1200~1800자, long ≈ 2500자+
 
@@ -140,6 +138,7 @@ python3 ~/.claude/skills/blog/scripts/paste_to_naver.py \
 실행 중 키보드·마우스를 건드리지 말라고 사용자에게 사전 고지할 것. 좌표 기반 실제 클릭이라 다른 창이 덮으면 오작동.
 
 ## 하드룰 (재확인)
+- **코퍼스 말투 모방 금지 / 기본 보이스 = 명료한 분석글, 전 문장 `~입니다` 체.** (2026-06-16 사용자 지시: "애매하게 따라하면 안 쓰니만 못하더라.") style-guide의 말투 패턴을 따르지 말 것.
 - **이모지 금지**. script.md, post.html, title_candidates, hashtags — 어디에도 단 한 개도 쓰지 말 것.
 - **`K-` 접두어 남용 금지.** `K-라노벨`, `K-포켓몬`, `K-게임`, `K-판타지` 같은 표현을 반복해서 쓰지 말 것. 한 포스트에 1번 이하. 대체 표현을 먼저 고민할 것.
 - **섹션 제목(`##`)에 작은따옴표/큰따옴표 쓰지 말 것.** 제목은 짧고 명료하게. 예: (X) `## '이 집에? 정말 이사해도 되겠니?'`, (X) `## 텅구리 : 안녕, 만나서 반가워`, (O) `## 모두의 집으로 이사 제안`, (O) `## 탕구리와 텅구리, 나란히`. 대사/인용은 본문 안에서만 쓸 것.
