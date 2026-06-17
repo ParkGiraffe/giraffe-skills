@@ -45,13 +45,12 @@ description: Generate a Naver blog draft (script + SmartEditor-compatible HTML +
 - **모든 문장 `~입니다`/`~합니다` 체로 통일.** 구어체·감탄사·말끝 흐림 금지.
 - 정보 전달과 논리적 흐름 우선. 한 섹션 = 한 주제. 불필요한 수식어·감상 군더더기 제거.
 - 구조: `# {제목}` → 도입 1~2단락 → `---` 또는 `## {소제목}` 반복 → 마무리
-- (이하 단계 번호는 기존 4~8을 그대로 따른다. SmartEditor HTML/메타/업로드 절차는 변경 없음.)
 - 이미지 자리는 `[스크린샷: 설명]` 또는 `![](경로)`로 마킹. `--images` 폴더가 있으면 파일명 힌트를 주고, 없으면 placeholder만.
 - `--length`: short ≈ 600~800자, normal ≈ 1200~1800자, long ≈ 2500자+
 
 결과를 `./.claude/blog-corpus/drafts/{YYYY-MM-DD}-{slug}/script.md`에 frontmatter(`title`, `category`, `date`) + 본문으로 저장.
 
-### 4. SmartEditor HTML 생성
+### 3. SmartEditor HTML 생성
 ```bash
 python3 ~/.claude/skills/blog/scripts/md_to_smarteditor.py \
   .claude/blog-corpus/drafts/.../script.md \
@@ -60,7 +59,7 @@ python3 ~/.claude/skills/blog/scripts/md_to_smarteditor.py \
 ```
 `md_to_smarteditor.py`는 이모지가 포함되면 exit 3으로 실패함. 실패하면 대본을 재생성하고 재시도.
 
-### 5. 메타 생성
+### 4. 메타 생성
 `./.claude/blog-corpus/drafts/.../meta.json`을 직접 작성:
 ```json
 {
@@ -74,13 +73,13 @@ python3 ~/.claude/skills/blog/scripts/md_to_smarteditor.py \
 - 해시태그: 스타일 가이드에서 관측된 포스트당 평균 개수만큼. 이모지 없이.
 - 카테고리: `index.json`에서 관찰된 실제 카테고리명 중 하나 선택
 
-### 6. 자체 검수
+### 5. 자체 검수
 ```bash
 grep -rP '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]' .claude/blog-corpus/drafts/<dir>/
 ```
 결과가 비어야 함. 비어있지 않으면 해당 파일을 수정하고 재검수.
 
-### 7. 사용자 보고 (필수 템플릿)
+### 6. 사용자 보고 (필수 템플릿)
 
 드래프트 작성을 마치면 **반드시** 아래 4가지를 사용자에게 출력해야 한다. 하나라도 빼먹지 말 것.
 
@@ -90,7 +89,7 @@ grep -rP '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]' .claude/blog-corpus/drafts/<di
 
 **(c) 해시태그 + 카테고리**
 
-**(d) 네이버 업로드 안내** — **디폴트는 Claude가 직접 자동 업로드** (아래 8-1 osascript 오케스트레이션). "업로드해줘" 한 마디면 탭 열기부터 제목 입력까지 Claude가 전부 수행한다고 안내. 수동 실행을 원하는 경우를 위해 드래프트 경로를 박은 명령 한 줄도 같이 출력:
+**(d) 네이버 업로드 안내** — **디폴트는 Claude가 직접 자동 업로드** (아래 7-1 osascript 오케스트레이션). "업로드해줘" 한 마디면 탭 열기부터 제목 입력까지 Claude가 전부 수행한다고 안내. 수동 실행을 원하는 경우를 위해 드래프트 경로를 박은 명령 한 줄도 같이 출력:
 ```bash
 python3 ~/.claude/skills/blog/scripts/paste_to_naver.py \
   .claude/blog-corpus/drafts/2026-04-14-pokopia-46-cubone-marowak
@@ -98,7 +97,7 @@ python3 ~/.claude/skills/blog/scripts/paste_to_naver.py \
 
 **(e) 수정 가이드** — 수정 요청은 "수정: XX" 또는 "제목 다시 뽑아줘" 등 자연어로 받으면 drafts/ 같은 폴더에서 in-place 갱신한다고 안내
 
-### 8. 네이버 업로드 매크로 (검증된 최종 워크플로)
+### 7. 네이버 업로드 매크로 (검증된 최종 워크플로)
 
 `post.html`을 브라우저에서 Cmd+A/Cmd+C 하는 방식은 Naver가 `file://` 이미지를 거부해서 이미지가 안 붙음. **검증된 해결책**: `paste_to_naver.py` 매크로.
 
@@ -127,7 +126,7 @@ python3 ~/.claude/skills/blog/scripts/paste_to_naver.py \
 - `시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용`에 터미널(또는 iTerm) 체크 — Cmd+V 자동 전송 권한
 - Chrome 메뉴 바 → 보기 → 개발자 → **"Apple Events의 자바스크립트 허용"** 체크 — osascript in-page JS 주입 권한
 
-### 8-1. osascript 자동 오케스트레이션 (디폴트)
+### 7-1. osascript 자동 오케스트레이션 (디폴트)
 
 **네이버 블로그에 글을 쓰는 모든 경우, Claude가 osascript로 전 과정을 자동 수행하는 것이 디폴트.** 사용자에게 "창 열고 클릭하세요" 류의 수동 단계를 시키지 말 것. claude-in-chrome 확장은 `blog.naver.com`을 하드블록하므로 쓸 수 없음 — 반드시 osascript 경로.
 
