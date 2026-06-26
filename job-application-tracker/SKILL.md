@@ -10,11 +10,16 @@ description: 채용 공고(URL 또는 붙여넣은 텍스트)를 받아 박요�
 
 ## DB 위치 (고정 좌표)
 
-- 데이터베이스 페이지: `지원 현황` — `352fd0c1-f4f9-4ecd-bc46-a6e43eb3c471`
-- 데이터소스(collection): `42bc0796-609b-4068-bcc5-d1204d1945bc`  ← 페이지 생성 시 `parent.data_source_id`로 사용
-- 상위 페이지: `업무관리`
+**워크스페이스 주의**: 현재 Notion MCP는 **개인 WS(pos000830 / 박요셉)**에 연결됨(회사 블루밍그레이스 아님). 아래는 개인 WS 좌표(2026-06-26 확정). 회사 WS 옛 ID(`352fd0c1…`/`42bc0796…`)는 404다.
 
-작업 시작 전 `notion-fetch`로 `collection://42bc0796-609b-4068-bcc5-d1204d1945bc`를 한 번 조회해 스키마(옵션 값)가 바뀌지 않았는지 확인하면 안전하다. ID가 더 이상 유효하지 않으면 `notion-search`로 "지원 현황"을 찾아 갱신한다.
+- 데이터베이스 페이지: `지원 현황` — `389c6f40-e87e-807c-b712-c7ee667cec82`
+- 데이터소스(collection): `304c6f40-e87e-83c6-9d24-070d8701834a`  ← 페이지 생성 시 `parent.data_source_id`로 사용
+- `서류` 관계 대상 ds: `b38c6f40-e87e-833e-b0a1-87c835f4eae3`
+- 상위 페이지: `업무관리` `389c6f40-e87e-80c9-bdc0-d7b176c0efe3`
+
+속성(개인 WS 실측): 회사(title)·직무(text)·상태(select: 검토/지원/서류통과/과제·코테/면접/처우협의/최종합격/탈락/보류/제외)·적합도(★1~5)·요구 경력(신입/1~3년/3~5년/5~10년/10년+/무관)·기술스택(multi: React/React Native/TypeScript/JavaScript/Next.js/Vue/Node.js/Flutter/iOS/Android/기타)·근무지역(text)·공고링크(url)·지원일(date)·마감일(date)·메모(text)·서류(relation).
+
+작업 시작 전 `notion-fetch`로 `collection://304c6f40-e87e-83c6-9d24-070d8701834a`를 한 번 조회해 스키마(옵션 값)가 바뀌지 않았는지 확인하면 안전하다. ID가 더 이상 유효하지 않으면 `notion-search`로 "지원 현황"을 찾아 갱신한다. (`query-data-sources`는 이 WS에서 Business 전용이라 막힘 → 행 조회는 search/fetch로.)
 
 ## 공고 읽기 (중요)
 
