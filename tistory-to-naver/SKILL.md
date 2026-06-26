@@ -114,7 +114,8 @@ python3 migrate_category.py '<CATEGORY_URL>' [옵션]
 
 | Tistory 마크업 | 네이버 SmartEditor HTML |
 |---|---|
-| `<h1>` ~ `<h6>` (속에 `<span style="background-color:...">` 있어도 됨) | `<p><span style="font-size:24px;background-color:#fff593;"><b>텍스트</b></span></p>` + `<p><br></p>` barrier (`/blog` 스킬과 동일한 노란 배경 24px 볼드 시그니처) |
+| **대제목** = `<h1>`, 또는 노란 배경 스팬(`<span style="background-color:...">`)을 가진 `<h2>~<h6>` | `<p><span style="font-size:24px;background-color:#fff593;"><b>텍스트</b></span></p>` + `<p><br></p>` barrier (노란 배경 24px 볼드) |
+| **소제목** = 노란 배경 없이 볼드만 있는 `<h3>~<h6>` (예: Tistory `<h3><b>1. Function declaration</b>`) | `<p><span style="font-size:19px;background-color:transparent;color:#212529;"><b>텍스트</b></span></p>` + barrier (19px 볼드·배경 없음). 2026-06-27 추가 — 레벨을 뭉개 소제목이 대제목처럼 뜨던 버그 수정. 판정은 heading 안 `background-color` 스팬 유무(`_heading_has_highlight`) |
 | `<hr data-ke-type="horizontalRule">` | `<hr>` (네이버가 자동으로 SmartEditor hr 블록으로 승격, 모양은 default 단선) |
 | 일반 본문 `<p>`/`<div>` | `<p><span style="font-size:15px;font-weight:normal;background-color:transparent;color:#212529;">텍스트</span></p>` (헤딩 스타일 번짐 차단용 명시적 reset) |
 | `<p>&nbsp;</p>` 빈 줄 | `<p><br></p>` barrier |
