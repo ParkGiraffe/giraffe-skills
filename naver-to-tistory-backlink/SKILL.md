@@ -95,12 +95,14 @@ IMG_COUNT=$(grep -c "se-image-resource" "$TMP/in.html")  # 표준 이미지 카�
   const LOG = '...';
   const BODY = `...본문 HTML 전체...`;
 
-  // 제목 — textarea native setter 필수 (KEditor가 React-like 추적 가능)
+  // 제목 — ⚠️ native value setter 는 글쓰기 페이지에서 KEditor 재렌더가 값을
+  //   날려버리는 산발적 버그가 있음 (실측: 새 글 진입 직후 제목이 ""로 리셋 →
+  //   완료해도 발행 레이어가 안 뜸). 가장 견고한 건 실타이핑 모사 execCommand:
   const t = document.getElementById('post-title-inp');
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-  setter.call(t, TITLE);
-  t.dispatchEvent(new Event('input', {bubbles: true}));
-  t.dispatchEvent(new Event('change', {bubbles: true}));
+  t.focus(); t.select();
+  document.execCommand('insertText', false, TITLE);
+  // 채운 뒤 t.value 를 반드시 재확인하고, 비었으면 insertText 재시도.
+  // 완료 클릭 전 제목 != "" 를 확정할 것 (빈 제목이면 발행 다이얼로그가 안 뜸).
 
   // 본문 — TinyMCE setContent + save + setDirty
   const ed = window.tinymce.editors[0];
@@ -171,6 +173,7 @@ Array.from(document.querySelectorAll('a'))
 - `🖼️ 이미지 {N}장` 박혀 있음
 - 자기소개 인사 없음
 - 제목 끝 ` | 정리본`
+- **본문 손상 없음** — TinyMCE setContent 가 멀티바이트 한 구간을 산발적으로 깨뜨릴 수 있음 (실측: "원문"→"옐문", "네이버"→"k이버", U+FFFD 혼입). curl 로 `옐문`/`�`(U+FFFD) 0개 + `원문 보기 (네이버 블로그)` 정상 매칭 확인. 깨졌으면 수정 모드(`/manage/post/<id>`)에서 해당 h2 만 정확한 문자열로 교체(`getContent().replace(/<h2[^>]*>[^<]*보기[^<]*<\/h2>/, 정상)` → `setContent` → `save`) 후 재발행.
 
 ## 안티패턴 (절대 금지)
 
@@ -189,6 +192,8 @@ Array.from(document.querySelectorAll('a'))
 - **태그 input 가려짐** — 사이드바 태그 input은 새 글 페이지 일부 layout에선 안 보이고, 다이얼로그가 가리기도 한다. **자동화하지 않고 수동 보정 단계로 분리**.
 - **네이버 도메인 navigate 불가** — claude-in-chrome MCP는 `*.naver.com`을 안전정책으로 차단. 본문 fetch는 반드시 curl 사용.
 - **네이버 curl 헤더** — iPhone UA + `Referer: https://blog.naver.com/` 필수. 안 그러면 빈 페이지 또는 캡차.
+- **대형 본문 base64 인라인 주입 잘림** — 한글 이스케이프 깨짐 방지로 TITLE/BODY 를 base64 ASCII 로 주입하는데, 본문이 크면(>~2KB, 예: 이미지 수십 장 글) 한 번에 인라인하면 페이로드가 중간에 잘리거나 망가지기 쉽다(실측 사고). **청크로 쪼개 페이지에서 `window.__b += '...'` 로 조립 → b64 길이·시작/끝·마커(h2 3개·이모지 4종·인사 0) 검증 후에만** `setContent`. browser_batch 로 청크 append + 검증을 한 라운드에 묶으면 깔끔.
+- **TinyMCE setContent 멀티바이트 손상** — 위 '본문 손상 없음' 검증 참조. 산발적이라 같은 코드로 한 글은 멀쩡하고 다른 글은 h2 한 줄이 깨질 수 있음(실측: 1편 정상, 다음 편 "원문→옐문"). **발행 직전 에디터 `getContent` 로 손상 검증(옐문/U+FFFD/`원문 보기` 누락)하고 깨졌으면 ABORT**, 발행 후 curl 재검증.
 
 ## 성공 기준
 
