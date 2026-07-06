@@ -29,11 +29,12 @@
 - Create: `english-study/scripts/fetch_news.py`
 
 **Interfaces:**
-- Produces: `python3 english-study/scripts/fetch_news.py` 실행 시 stdout으로 JSON 출력.
-  - 형태: `{"ok": bool, "failed": [{"subreddit": str, "error": str}], "candidates": {"game_news": [POST], "game_fun": [POST], "free_topic": [POST]}}`
-  - POST = `{"title": str, "selftext": str(최대 500자), "score": int, "num_comments": int, "url": str(레딧 코멘트 링크), "external_url": str(원문 기사 링크, 없으면 빈 문자열), "subreddit": str, "over_18": bool}`
-  - `over_18=true` 글은 스크립트가 이미 제외하고 출력한다.
+- Produces: `python3 english-study/scripts/fetch_news.py` 실행 시 stdout으로 JSON 출력. 실행 시간 약 1~2분 (rate limit 대기 포함) — Bash timeout 180초 이상으로 호출.
+  - 형태: `{"ok": bool, "failed": [{"feed": str, "error": str}], "candidates": {"game_news": [POST], "game_fun": [POST], "free_topic": [POST]}}`
+  - POST = `{"title": str, "url": str(레딧 코멘트 링크), "external_url": str(원문 기사 링크, 셀프 글이면 빈 문자열), "subreddit": str, "author": str, "published": str}`
+  - 각 배열은 top-of-day 순서(피드 상단 = 고득점)라 score 필드 없이도 상위가 인기 글이다.
   - Task 3의 SKILL.md가 이 JSON 키 이름을 그대로 참조한다.
+  - 실측(2026-07-06): Reddit 익명 JSON API(www/old/api.reddit.com)는 브라우저 UA로도 전부 403 차단. RSS(Atom)만 열려 있고 익명 RSS는 IP당 분당 1요청 수준 rate limit(x-ratelimit 헤더로 확인) → 멀티레딧(`r/games+gaming`)으로 요청을 2개로 압축하고 사이에 reset 헤더만큼 대기한다.
 
 - [ ] **Step 1: 스크립트 작성**
 
@@ -41,60 +42,100 @@
 
 ```python
 #!/usr/bin/env python3
-"""Reddit 인기 글 수집 - english-study 스킬용.
+"""Reddit 인기 글 수집 - english-study 스킬용 (RSS 기반).
 
-r/games(게임 뉴스), r/gaming(게임 소식·재미), r/popular(자유 토픽)의
-top-of-day 글을 모아 JSON으로 출력한다.
+Reddit은 익명 JSON API(www/old/api.reddit.com)를 브라우저 UA로도 403 차단한다
+(2026-07-06 실측). RSS(Atom)만 열려 있고, 익명 RSS는 IP당 분당 1요청 수준의
+rate limit이 있어 요청을 2개로 압축했다:
+  1) r/games+gaming 멀티레딧 top-of-day (게임 뉴스+소식, limit=25)
+  2) r/popular top-of-day (자유 토픽, limit=10)
+요청 사이에는 x-ratelimit-reset 헤더만큼 대기한다. 총 실행 약 1~2분.
 
-사용: python3 english-study/scripts/fetch_news.py
-출력: {"ok": bool, "failed": [...], "candidates": {"game_news": [...], "game_fun": [...], "free_topic": [...]}}
-
-Reddit은 기본 UA를 차단하므로 브라우저형 UA를 쓴다.
-여기서도 차단되면 SKILL.md의 폴백 체인(curl + old.reddit.com)을 따른다.
+사용: python3 english-study/scripts/fetch_news.py   (Bash timeout 180초 이상)
+출력: {"ok": bool, "failed": [{"feed", "error"}],
+       "candidates": {"game_news": [...], "game_fun": [...], "free_topic": [...]}}
+각 배열은 top-of-day 순서(상단 = 고득점)다.
 """
+import html
 import json
+import re
 import sys
+import time
+import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-
-SUBREDDITS = [
-    ("games", "game_news"),
-    ("gaming", "game_fun"),
-    ("popular", "free_topic"),
+ATOM = "{http://www.w3.org/2005/Atom}"
+FEEDS = [
+    ("games+gaming", "https://www.reddit.com/r/games+gaming/top/.rss?t=day&limit=25"),
+    ("popular", "https://www.reddit.com/r/popular/top/.rss?t=day&limit=10"),
 ]
-LIMIT = 10
+MAX_WAIT = 90
 
 
-def fetch_top(sub, limit=LIMIT):
-    url = f"https://www.reddit.com/r/{sub}/top.json?t=day&limit={limit}&raw_json=1"
+def reset_seconds(headers):
+    try:
+        return int(float(headers.get("x-ratelimit-reset", "60")))
+    except (TypeError, ValueError):
+        return 60
+
+
+def fetch(url):
+    """(xml_text, 다음 요청까지 대기초) 반환. 429면 reset만큼 기다렸다 1회 재시도."""
     req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        data = json.load(resp)
+    for attempt in (1, 2):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return resp.read().decode("utf-8"), reset_seconds(resp.headers)
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt == 1:
+                time.sleep(min(reset_seconds(e.headers) + 5, MAX_WAIT))
+                continue
+            raise
+
+
+def parse_entries(xml_text):
     posts = []
-    for child in data["data"]["children"]:
-        d = child["data"]
+    for entry in ET.fromstring(xml_text).iter(f"{ATOM}entry"):
+        link = entry.find(f"{ATOM}link")
+        cat = entry.find(f"{ATOM}category")
+        author = entry.findtext(f"{ATOM}author/{ATOM}name") or ""
+        content = html.unescape(entry.findtext(f"{ATOM}content") or "")
+        m = re.search(r'href="([^"]+)">\s*\[link\]', content)
+        external = m.group(1) if m else ""
+        if external.startswith("https://www.reddit.com"):
+            external = ""  # 셀프 포스트는 원문 링크가 곧 레딧 글
         posts.append({
-            "title": d.get("title", ""),
-            "selftext": (d.get("selftext") or "")[:500],
-            "score": d.get("score", 0),
-            "num_comments": d.get("num_comments", 0),
-            "url": "https://www.reddit.com" + d.get("permalink", ""),
-            "external_url": d.get("url_overridden_by_dest") or "",
-            "subreddit": d.get("subreddit", sub),
-            "over_18": d.get("over_18", False),
+            "title": entry.findtext(f"{ATOM}title") or "",
+            "url": link.get("href") if link is not None else "",
+            "external_url": external,
+            "subreddit": cat.get("term") if cat is not None else "",
+            "author": author.removeprefix("/u/"),
+            "published": entry.findtext(f"{ATOM}updated") or "",
         })
-    return [p for p in posts if not p["over_18"]]
+    return posts
 
 
 def main():
     result = {"ok": True, "failed": [], "candidates": {}}
-    for sub, key in SUBREDDITS:
+    wait = 0
+    for i, (name, url) in enumerate(FEEDS):
+        if i > 0:
+            time.sleep(min(wait + 5, MAX_WAIT))
         try:
-            result["candidates"][key] = fetch_top(sub)
+            xml_text, wait = fetch(url)
+            posts = parse_entries(xml_text)
         except Exception as e:
-            result["failed"].append({"subreddit": sub, "error": str(e)})
+            result["failed"].append({"feed": name, "error": str(e)})
+            wait = 60
+            continue
+        if name == "games+gaming":
+            result["candidates"]["game_news"] = [p for p in posts if p["subreddit"].lower() == "games"]
+            result["candidates"]["game_fun"] = [p for p in posts if p["subreddit"].lower() == "gaming"]
+        else:
+            result["candidates"]["free_topic"] = posts
     if not result["candidates"]:
         result["ok"] = False
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
@@ -109,6 +150,8 @@ if __name__ == "__main__":
 
 Run:
 
+Run (Bash timeout 240초 이상, 실행에 약 1~2분 소요):
+
 ```bash
 python3 english-study/scripts/fetch_news.py | python3 -c "
 import json, sys
@@ -116,28 +159,28 @@ d = json.load(sys.stdin)
 assert isinstance(d['ok'], bool), 'ok 필드 없음'
 assert isinstance(d['failed'], list), 'failed 필드 없음'
 assert isinstance(d['candidates'], dict), 'candidates 필드 없음'
-for key in d['candidates']:
-    assert key in ('game_news', 'game_fun', 'free_topic'), f'알 수 없는 키 {key}'
+for key in ('game_news', 'game_fun', 'free_topic'):
+    assert key in d['candidates'], f'{key} 없음'
     posts = d['candidates'][key]
     assert len(posts) >= 1, f'{key} 비어 있음'
-    p = posts[0]
-    for field in ('title', 'selftext', 'score', 'num_comments', 'url', 'external_url', 'subreddit', 'over_18'):
-        assert field in p, f'{key}[0]에 {field} 없음'
-    assert not p['over_18'], 'over_18 필터 미동작'
-print('OK: keys =', list(d['candidates'].keys()), '/ failed =', d['failed'])
+    for field in ('title', 'url', 'external_url', 'subreddit', 'author', 'published'):
+        assert field in posts[0], f'{key}[0]에 {field} 없음'
+print('OK:', {k: len(v) for k, v in d['candidates'].items()}, '/ failed =', d['failed'])
 "
 ```
 
-Expected: `OK: keys = ['game_news', 'game_fun', 'free_topic'] / failed = []`
+Expected: `OK: {'game_news': N, 'game_fun': M, 'free_topic': 10} / failed = []` (N+M = 25 내외, N·M 모두 1 이상)
 
-Reddit이 차단해 `failed`에 항목이 생기면: 스크립트 버그가 아니라 네트워크/차단 문제인지 `curl -A "<위 UA 문자열>" "https://old.reddit.com/r/games/top.json?t=day&limit=3"`으로 교차 확인하고, 차단이면 그 사실을 보고한 뒤 진행(폴백 체인은 SKILL.md에 명시됨).
+직전 1분 안에 Reddit RSS를 조회한 적이 있으면 첫 요청이 429를 맞고 스크립트가 자동으로 한 번 재시도한다(그만큼 더 걸림). `failed`에 항목이 남으면 rate limit 쿨다운 후 1회 재실행해 보고, 그래도 실패면 그 사실을 보고한다.
 
 - [ ] **Step 3: 커밋**
 
 ```bash
 git add english-study/scripts/fetch_news.py
-git commit -m "english-study: Reddit 뉴스 수집 스크립트 추가 (r/games, r/gaming, r/popular top-of-day)"
+git commit -m "english-study: fetch_news.py를 RSS 기반으로 전환 (Reddit JSON API 403 차단 대응)"
 ```
+
+(참고: 최초 JSON API 버전은 ef9f9bb로 커밋됨. 이 커밋은 RSS 전환분.)
 
 ---
 
@@ -282,17 +325,17 @@ description: 박기린님의 영어 공부 세션을 진행한다. Reddit에서 
 ### 2. 뉴스 수집
 
 ```bash
-python3 english-study/scripts/fetch_news.py
+python3 english-study/scripts/fetch_news.py   # 약 1~2분 소요 (rate limit 대기 포함), Bash timeout 180초 이상
 ```
 
-출력 JSON의 `candidates.game_news`(r/games) / `candidates.game_fun`(r/gaming)에서 게임 2건, `candidates.free_topic`(r/popular)에서 1건을 고른다. 기준: `score`와 재미(사용자는 게임 취미). `over_18` 글은 스크립트가 이미 걸렀다.
+출력 JSON의 `candidates.game_news`(r/games) / `candidates.game_fun`(r/gaming)에서 게임 2건, `candidates.free_topic`(r/popular)에서 1건을 고른다. 각 배열은 top-of-day 순서라 위쪽일수록 인기 글이다. 기준: 인기(배열 순서)와 재미(사용자는 게임 취미). RSS에는 성인물 플래그가 없으므로 부적절한 글은 큐레이션 단계에서 직접 거른다.
 
 - **중복 확인**: 단어장 DB 최근 행들의 "출처"에 같은 뉴스 제목이 있으면 다음 후보로 넘긴다.
 - 사용자가 "오늘은 1건만"이라고 하면 분량을 줄인다.
 
-**폴백 체인** (스크립트 실패 시, 네이버 수집 관례와 동일):
+**폴백 체인** (스크립트 실패 시, 네이버 수집 관례와 동일). Reddit 익명 JSON API(www/old/api.reddit.com)는 403 차단이므로(2026-07-06 실측) 폴백도 RSS다:
 
-1. `curl -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" "https://old.reddit.com/r/games/top.json?t=day&limit=10"` (r/gaming, r/popular도 동일 패턴)
+1. `curl -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" "https://www.reddit.com/r/games+gaming/top/.rss?t=day&limit=25"` → 60~70초 대기 → 같은 UA로 `https://www.reddit.com/r/popular/top/.rss?t=day&limit=10` (익명 RSS는 분당 1요청 수준 rate limit)
 2. 그것도 막히면 그날만 WebSearch로 대체하고, 세션 후 스크립트를 점검한다.
 
 ### 3. 건별 루프 (건당 4~5분)
@@ -339,7 +382,7 @@ python3 english-study/scripts/fetch_news.py
 
 ## 함정 / 주의
 
-- Reddit은 기본 UA를 차단한다 — 스크립트가 브라우저형 UA를 쓰며, 그래도 403이면 위 폴백 체인.
+- Reddit 익명 JSON API는 브라우저 UA로도 403 차단(2026-07-06 실측) — 스크립트는 RSS(Atom)를 쓴다. 익명 RSS는 분당 1요청 수준 rate limit이라 요청 2개(멀티레딧 games+gaming, popular)로 압축하고 사이에 대기한다. 스크립트 실행은 Bash timeout 180초 이상으로.
 - WebFetch는 reddit/naver 등에서 막힐 수 있다 — curl + 브라우저 UA 경로를 쓴다.
 - 한글 리터럴 깨짐 사고 전례("챕터8"→"챕터엘") — Notion 저장 후 재검증 필수.
 - 복습 판정을 후하게 주지 않는다 — 애매하면 사용자에게 "이 정도면 맞힌 걸로 할까요?"라고 묻는다.
@@ -377,7 +420,7 @@ git commit -m "english-study 스킬 추가: 뉴스 영어 공부 + 소감 교정
 대화 기억에 의존하지 말고 `english-study/SKILL.md`만 읽고 그대로 따라 한다:
 
 1. 방법론 페이지 fetch → "현재 리라이팅 난이도: 1단계" 읽힘 확인
-2. `python3 english-study/scripts/fetch_news.py` 실행 → 게임 2건 + 자유 1건을 실제로 선정해 제목을 사용자에게 보여줌
+2. `python3 english-study/scripts/fetch_news.py` 실행 (약 1~2분, Bash timeout 180초 이상) → 게임 2건 + 자유 1건을 실제로 선정해 제목을 사용자에게 보여줌
 
 Expected: SKILL.md에 적힌 좌표·명령만으로 두 단계가 완주됨. 막히는 지점이 있으면 그것이 곧 SKILL.md의 결함이므로 해당 부분을 수정한다.
 
