@@ -78,7 +78,8 @@ blog/SKILL.md 7-1 자동 흐름 그대로:
    python3 ~/Desktop/Project/personal/tistory-to-naver-blog/inject_code_blocks.py
    ```
    (기본 사이드카 경로 `/tmp/naver_code_blocks.json` 사용. 언어 표기는 기본 javascript — 다르면 에디터에서 수동 변경)
-4. 제목 자동 입력 (pbcopy → 제목칸 클릭 → Cmd+V)
+4. **스타일 패스** (빼먹기 쉬움 — 2026-07-07 첫 실행 때 누락): migrate.py의 `style_pass()` 호출로 모든 구분선을 line3(가운데 꺾임)+가운데 정렬, 모든 사진을 가운데 정렬로. 합성 JS만 쓰므로 전면 앱 무관. 실행 후 셀렉터로 적용 여부 검증.
+5. 제목 자동 입력 (pbcopy → 제목칸 클릭 → Cmd+V)
 
 ### 6. 발행 — 개발 글은 비공개
 
