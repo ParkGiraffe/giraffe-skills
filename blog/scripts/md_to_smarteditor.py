@@ -231,6 +231,9 @@ def convert(src: str, images_dir: pathlib.Path | None = None,
             if level == 1 and title and text == title:
                 pass
             else:
+                # 세션 제목(##) 위에는 항상 구분선 (기린님 블로그 작성법)
+                if level == 2 and components and "se-horizontalLine" not in components[-1]:
+                    components.append(horizontal_line())
                 components.append(text_component(text, heading=True))
             i += 1
             continue
