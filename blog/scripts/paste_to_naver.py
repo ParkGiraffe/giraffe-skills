@@ -126,7 +126,15 @@ def heading_html(text: str, level: int = 2) -> str:
     return f'<p><span style="{style}"><b>{t}</b></span></p>'
 
 
+BOLD_LINE_RE = re.compile(r"^\*\*([^*].*?)\*\*$")
+
+
 def body_html(text: str) -> str:
+    # 단락 전체가 **...** 로 감싸진 경우 본문 볼드로 렌더 (예: 방문일/버그 발생일 기록)
+    b = BOLD_LINE_RE.match(text)
+    if b:
+        t = _html_escape(b.group(1).strip())
+        return f'<p><span style="{BODY_SPAN_STYLE}"><b>{t}</b></span></p>'
     t = _html_escape(text)
     return f'<p><span style="{BODY_SPAN_STYLE}">{t}</span></p>'
 
