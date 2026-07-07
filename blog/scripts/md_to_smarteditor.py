@@ -21,12 +21,29 @@ def esc(s: str) -> str:
 
 # ---------- component builders ----------
 
+INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+INLINE_CODE_STYLE = (
+    "font-size:14px;background-color:#f2f3f5;color:#d6336c;"
+    "border-radius:3px;padding:1px 4px;"
+)
+
+
+def render_inline(text: str) -> str:
+    out, pos = [], 0
+    for m in INLINE_CODE_RE.finditer(text):
+        out.append(esc(text[pos:m.start()]))
+        out.append(f'<span style="{INLINE_CODE_STYLE}">{esc(m.group(1))}</span>')
+        pos = m.end()
+    out.append(esc(text[pos:]))
+    return "".join(out)
+
+
 def text_component(text: str, *, heading: bool = False, bold: bool = False, align: str = "") -> str:
     cid = uid()
     pid = uid()
     sid = uid()
     fs = "fs24" if heading else ""
-    inner = f"<b>{esc(text)}</b>" if (heading or bold) else esc(text)
+    inner = f"<b>{render_inline(text)}</b>" if (heading or bold) else render_inline(text)
     return f'''<div class="se-component se-text se-l-default" id="{cid}">
 <div class="se-component-content">
 <div class="se-section se-section-text se-l-default">
