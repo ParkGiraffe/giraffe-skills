@@ -128,14 +128,33 @@ def heading_html(text: str, level: int = 2) -> str:
 
 BOLD_LINE_RE = re.compile(r"^\*\*([^*].*?)\*\*$")
 
+# 인라인 코드(`...`): 노션풍 회색 배경 + 붉은 글자 span으로 렌더 (2026-07-07)
+INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+INLINE_CODE_STYLE = (
+    "font-size:14px;background-color:#f2f3f5;color:#d6336c;"
+    "border-radius:3px;padding:1px 4px;"
+)
+
+
+def _render_inline(text: str) -> str:
+    """HTML 이스케이프 + 인라인 코드(`...`)를 스타일 span으로 변환."""
+    out = []
+    pos = 0
+    for m in INLINE_CODE_RE.finditer(text):
+        out.append(_html_escape(text[pos:m.start()]))
+        out.append(f'<span style="{INLINE_CODE_STYLE}">{_html_escape(m.group(1))}</span>')
+        pos = m.end()
+    out.append(_html_escape(text[pos:]))
+    return "".join(out)
+
 
 def body_html(text: str) -> str:
     # 단락 전체가 **...** 로 감싸진 경우 본문 볼드로 렌더 (예: 방문일/버그 발생일 기록)
     b = BOLD_LINE_RE.match(text)
     if b:
-        t = _html_escape(b.group(1).strip())
+        t = _render_inline(b.group(1).strip())
         return f'<p><span style="{BODY_SPAN_STYLE}"><b>{t}</b></span></p>'
-    t = _html_escape(text)
+    t = _render_inline(text)
     return f'<p><span style="{BODY_SPAN_STYLE}">{t}</span></p>'
 
 
