@@ -105,6 +105,7 @@ curl -s -A "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)" "https://m.b
 - **본문 클릭 성공을 `isContentEditable`로 판정하지 말 것.** SmartEditor는 자체 캐럿 모델이라 activeElement가 일반 contenteditable로 안 잡힌다. 검증된 프로토콜(migrate.py)은 "클릭 → paste → 컴포넌트 수 증가로 검증"이다. paste 후 `se-image` 수(=이미지 장수)와 `.se-text p` 수 증가를 확인하고, 0이면 중단.
 - **탭 활성화·창 raise·좌표 측정·클릭은 한 프로세스에서 원자적으로.** 셸 호출을 쪼개면 사이에 창 순서가 바뀌어 좌표가 다른 창에 떨어진다.
 - **마크다운 인라인 문법은 전체 라인 볼드(`**...**` 단독 라인)만 지원.** 문장 중간 부분 볼드·마크다운 링크(`[텍스트](URL)`)는 파서가 몰라 별표/대괄호가 그대로 찍힌다. 링크는 순수 URL 텍스트로 넣고 필요 시 에디터에서 수동으로 걸 것.
+- **클립보드 HTML은 반드시 `paste_to_naver.copy_html_to_clipboard()`로 쓸 것 — NSPasteboard에 손으로 쓰지 말 것 (2026-07-07 취소선 사고).** 손으로 만든 public.html 페이로드를 붙였더니 SE가 해시태그 줄을 `<strike>`로 감쌌고, 같은 자리에 재붙여넣기해도 SE가 캐럿의 인라인 서식(취소선)을 유지해 반복 재발했다. 서식 이상이 보이면 반복 paste로 싸우지 말고 즉시 사용자에게 넘길 것 (툴바에서 서식 해제가 확실).
 - **claude-in-chrome은 blog.naver.com을 하드블록** — 네이버 자동화는 osascript 경로만 ([[naver-automation-osascript-route]]).
 - Notion S3 서명 URL 만료(5분) — fetch와 다운로드는 반드시 같은 턴에.
 - 외부 클립보드로는 어떤 SmartEditor 마크업을 붙여도 본문 컴포넌트로 normalize됨 — 소제목은 시각 스타일(노란 배경 24px 볼드)로 충분, 코드블록만 inject_code_blocks.py로 native 주입 (원리는 tistory-to-naver/SKILL.md 참조).
