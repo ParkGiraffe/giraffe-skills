@@ -235,8 +235,15 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             elements.append(("html", heading_html(tok[2], level)))
         elif typ == "img":
             # caption-after(사진 먼저, 밑에 설명글). 직전이 설명글이면 [사진+설명] 블록이
-            # 끝난 것이므로 4줄 띄우고 새 사진. 소제목/구분선/앞 사진 뒤엔 딱 붙임.
-            n = SPACE_AFTER_TEXT if prev_type == "p" else 0
+            # 끝난 것이므로 4줄 띄우고 새 사진. 구분선/앞 사진 뒤엔 딱 붙임.
+            # 단 소제목 바로 뒤 사진은 barrier 한 칸을 둔다 — 안 두면 사진 다음 본문이
+            # 소제목의 노란 배경 서식을 상속해 노랑 번짐이 생긴다(빈 단락이 상속을 끊음).
+            if prev_type == "p":
+                n = SPACE_AFTER_TEXT
+            elif prev_type == "h":
+                n = 1
+            else:
+                n = 0
             blanks(n)
             elements.append(("img", tok[1]))
         else:  # 'p' (사진 아래 설명글)
