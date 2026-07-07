@@ -155,10 +155,30 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
     para: list[str] = []
 
     def flush_para():
+        # 줄 끝 백슬래시(\) = 단순 줄바꿈(markdown hard break).
+        # 노션의 인접 블록(Enter)처럼 빈 줄 없이 <p>만 나눠 연속 렌더한다.
         if para:
-            text = " ".join(l.strip() for l in para if l.strip())
-            if text:
-                tokens.append(("p", text))
+            segs: list[str] = []
+            cur: list[str] = []
+            for l in para:
+                s = l.strip()
+                if not s:
+                    continue
+                if s.endswith("\\"):
+                    cur.append(s[:-1].rstrip())
+                    seg = " ".join(x for x in cur if x)
+                    if seg:
+                        segs.append(seg)
+                    cur = []
+                else:
+                    cur.append(s)
+            tail = " ".join(x for x in cur if x)
+            if tail:
+                segs.append(tail)
+            if len(segs) == 1:
+                tokens.append(("p", segs[0]))
+            elif segs:
+                tokens.append(("pgroup", segs))
         para.clear()
 
     auto_idx = 0
@@ -254,6 +274,17 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
                 n = 0
             blanks(n)
             elements.append(("img", tok[1]))
+        elif typ == "pgroup":  # 백슬래시 줄바꿈 그룹: 문단 여백 규칙은 그룹 단위로만
+            if prev_type in ("img", "h"):
+                n = 0
+            elif prev_type == "p":
+                n = 1
+            else:
+                n = 0
+            blanks(n)
+            for seg in tok[1]:
+                elements.append(("html", body_html(seg)))
+            typ = "p"  # 이후 여백 판단에는 일반 문단으로 취급
         else:  # 'p' (사진 아래 설명글)
             if prev_type in ("img", "h"):
                 n = 0                  # 설명글은 사진/소제목 바로 밑에 딱 붙임
