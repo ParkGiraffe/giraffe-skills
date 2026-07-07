@@ -21,12 +21,12 @@ def esc(s: str) -> str:
 
 # ---------- component builders ----------
 
-def text_component(text: str, *, heading: bool = False, align: str = "") -> str:
+def text_component(text: str, *, heading: bool = False, bold: bool = False, align: str = "") -> str:
     cid = uid()
     pid = uid()
     sid = uid()
     fs = "fs24" if heading else ""
-    inner = f"<b>{esc(text)}</b>" if heading else esc(text)
+    inner = f"<b>{esc(text)}</b>" if (heading or bold) else esc(text)
     return f'''<div class="se-component se-text se-l-default" id="{cid}">
 <div class="se-component-content">
 <div class="se-section se-section-text se-l-default">
@@ -89,6 +89,7 @@ IMAGE_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 HR_RE = re.compile(r"^\s*---\s*$")
 QUOTE_RE = re.compile(r"^>\s*(.*)$")
+BOLD_LINE_RE = re.compile(r"^\*\*([^*].*?)\*\*\s*$")
 
 
 def parse_frontmatter(src: str) -> tuple[dict, str]:
@@ -240,6 +241,12 @@ def convert(src: str, images_dir: pathlib.Path | None = None,
                 components.append(image_component(maybe_embed(matched, embed), label))
             else:
                 components.append(placeholder_component(label))
+            i += 1
+            continue
+        b = BOLD_LINE_RE.match(line)
+        if b:
+            flush_para()
+            components.append(text_component(b.group(1).strip(), bold=True))
             i += 1
             continue
         q = QUOTE_RE.match(line)
