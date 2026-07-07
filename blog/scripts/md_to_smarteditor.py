@@ -187,11 +187,27 @@ def convert(src: str, images_dir: pathlib.Path | None = None,
     para_buf: list[str] = []
 
     def flush_para():
+        # 줄 끝 백슬래시(\) = 단순 줄바꿈: 빈 줄 없이 문단만 나눠 연속 렌더
         nonlocal para_buf
         if para_buf:
-            text = " ".join(l.strip() for l in para_buf if l.strip())
-            if text:
-                components.append(text_component(text))
+            segs, cur = [], []
+            for l in para_buf:
+                s = l.strip()
+                if not s:
+                    continue
+                if s.endswith("\\"):
+                    cur.append(s[:-1].rstrip())
+                    seg = " ".join(x for x in cur if x)
+                    if seg:
+                        segs.append(seg)
+                    cur = []
+                else:
+                    cur.append(s)
+            tail = " ".join(x for x in cur if x)
+            if tail:
+                segs.append(tail)
+            for seg in segs:
+                components.append(text_component(seg))
             para_buf = []
 
     auto_img_idx = 0
