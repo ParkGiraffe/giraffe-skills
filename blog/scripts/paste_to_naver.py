@@ -251,6 +251,11 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             elements.append(("html", "<hr>"))
         elif typ == "h":
             level = tok[1]
+            if level == 2 and prev_type != "hr":
+                # 세션 제목(##) 위에는 항상 구분선 — 기린님 블로그 작성법 (2026-07-07)
+                blanks(SPACE_BEFORE_SESSION)
+                elements.append(("html", "<hr>"))
+                prev_type = "hr"
             if prev_type == "hr":
                 n = 0  # 구분선↔제목 딱 붙임 (여백은 이미 구분선 위에)
             elif prev_type == "h":
