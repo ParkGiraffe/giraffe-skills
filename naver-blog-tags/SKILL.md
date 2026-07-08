@@ -22,6 +22,14 @@ description: 네이버 블로그 글의 해시태그를 추출·추천합니다.
 - 입력은 셋 중 하나: (a) 붙여넣은 본문, (b) 티스토리 URL, (c) 네이버 글 URL/logNo.
   - 티스토리는 `curl`(아이폰 UA)로 본문·`rel="tag"` 추출.
   - 네이버는 **WebFetch 금지** → `curl`(아이폰 UA + Referer)로만. `scripts/user_tag_style.py --logno <N>`로 기존 태그까지 디코드.
+
+> **제목·태그의 정본(SSOT)은 무조건 네이버 원본.** 티스토리 정리본은 참고용 백링크일 뿐, 제목 서식을 훼손하므로(대괄호 안 공백 제거 `[포켓몬 GO]`→`[포켓몬GO]`, 구분자 `:`→`/`, 뒤에 ` | 정리본` 추가) **제목·화수의 근거로 티스토리를 읽지 말 것.** 네이버 최신 글 목록·제목·`logNo`를 직접 열거하는 API가 curl로 된다:
+> ```bash
+> curl -s -A "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" \
+>   -H "Referer: https://m.blog.naver.com/op5321" \
+>   "https://m.blog.naver.com/api/blogs/op5321/post-list?categoryNo=0&itemCount=30&page=1"
+> ```
+> JSON `result.items[]` 각 항목의 `titleWithInspectMessage`(제목, HTML 이스케이프)·`logNo`를 읽는다(파싱 예: `python3 -c "import sys,json,html; d=json.load(sys.stdin); [print(p.get('logNo'), html.unescape(p.get('titleWithInspectMessage',''))) for p in d['result']['items']]"`). 여기서 `[카테고리 ]` 제목을 grep해 시리즈 **최대 화수 +1**을 확정하고(네이버 기준, 티스토리 아님), `logNo`로 그 글의 `tagNames`를 디코드해 실제 태그를 확인한다. (네이버 RSS·모바일 홈 HTML은 curl로 비어서 안 됨 → 이 API가 정답.)
 - 본문에서 **고유명사·이벤트명·아이템명·지명·시스템명·수치(레벨 등)**를 개체 단위로 추출.
   예) 260레벨, 하이퍼버닝 MAX, 버닝 BEYOND, 6차 전직, 어센틱심볼 세르니움, 챌린저스 패스, 운영자 사과/OVERDRIVE.
 
