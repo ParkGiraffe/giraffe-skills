@@ -44,6 +44,26 @@ done | sort -u
 # (c) (a) - (b) 차집합 첫 번째 = 백링크 미생성 최신 글
 ```
 
+#### 제외 규칙: 티스토리 원본이 살아있는 글
+
+네이버 글 중 일부는 원래 티스토리에서 옮겨온 것이고, 본문 하단에 마이그레이션 푸터가 남아 있다:
+
+```
+해당 글은 티스토리 블로그 https://arnopark.tistory.com/NNN의 글을 마이그레이션한 글입니다.
+원본 작성일 : YYYY년 MM월 DD일
+```
+
+이때 **원본 URL의 HTTP 상태코드가 판단 기준**이다. 정리본을 또 올리면 같은 도메인에 같은 내용이 두 벌 생겨 오히려 SEO에 해롭기 때문이다.
+
+- `403` (비공개 전환됨) → **정리본 발행 대상**. 구글이 볼 수 있는 티스토리 사본이 없으니 백링크가 필요하다. (예: 젤다 사당 연재 — 원본 723/734/735/736 전부 403)
+- `200` (아직 공개) → **제외**. 이미 색인 가능한 티스토리 원본이 있다. (예: `[JS 강의]` 계열 — `js-lecture-publish`가 티스토리→네이버로 옮긴 글들이라 원본이 그대로 공개 상태)
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" "https://arnopark.tistory.com/<원본번호>"
+```
+
+RSS 50개 창 안에서 `[JS 강의]`가 20개 넘게 잡히는 게 정상이다. 이걸 미처리 백로그로 착각하지 말 것.
+
 ### 2. 네이버 본문 파싱
 ```bash
 TMP=$(mktemp -d)
@@ -54,31 +74,44 @@ IMG_COUNT=$(grep -c "se-image-resource" "$TMP/in.html")  # 표준 이미지 카�
 ```
 추출할 항목: 제목, 카테고리, h2 헤딩 리스트, 본문 단락(이미지 제외), `IMG_COUNT`.
 
+**본문 단락에서 반드시 걷어낼 것** (1227 발행본 대조로 확증):
+
+- `안녕하세요. 박기린입니다.` — 인사말
+- `해당 글은 티스토리 블로그 …를 마이그레이션한 글입니다.` / `원본 작성일 : …` — 마이그레이션 푸터
+
+푸터를 남기면 요약 끝이 "…arnopark.tistory.com/735의 글을 마이그레이션한 글입니다. 원본 작성일 : 2023년 06월 12일"로 끝난다. 정리본은 네이버 원문으로 유도하는 글인데 죽은 티스토리 주소를 본문에 박는 셈이라 목적이 뒤집힌다.
+
+이 두 가지를 제거하면 발행본 1227(logNo 224339790817)의 요약이 **572자, 문자 단위로 정확히 재현**된다. 파서를 고쳤을 때 이 글로 회귀 테스트를 돌리면 규칙이 안 깨졌는지 바로 확인된다.
+
+`IMG_COUNT`는 `grep -c se-image-resource`로 센다 (1227의 "이미지 29장"과 일치 확인).
+
 ### 3. 1002 형식 본문 HTML 조립 (정본)
 
 **제목**: `{원본 제목} | 정리본`
 
-**본문**:
+**본문**: 티스토리 에디터(KEditor)는 자체 `data-ke-*` 속성으로 블록 스타일을 관리한다. 이 속성이 없으면 발행은 되지만 수정 모드에서 스타일 툴바가 블록을 인식하지 못해 편집이 어긋난다. 발행본 1227에서 실측한 정본 마크업은 다음과 같다:
+
 ```html
-<blockquote>이 글은 네이버 블로그 「<a href="https://m.blog.naver.com/op5321/{LOG}" target="_blank" rel="noopener">박기린의 기린파크</a>」 원문을 정리한 요약본입니다. 원문 전체와 이미지는 네이버에서 볼 수 있어요.</blockquote>
-
-<h2>요약</h2>
-<p>{원문 본문을 풀어쓴 한 단락. 짧은 추상 요약 절대 금지. 원문 톤·문장을 거의 그대로 옮기되 800자에서 자른다. 자연스러운 미완결 (",", " N자 가면,") 로 끝낸다.}</p>
-
-<h2>핵심 포인트</h2>
-<ul>
+<blockquote data-ke-style="style1">이 글은 네이버 블로그 「<a href="https://m.blog.naver.com/op5321/{LOG}" target="_blank" rel="noopener">박기린의 기린파크</a>」 원문을 정리한 요약본입니다. 원문 전체와 이미지는 네이버에서 볼 수 있어요.</blockquote>
+<h2 data-ke-size="size26">요약</h2>
+<p data-ke-size="size16">{원문 본문을 풀어쓴 한 단락. 짧은 추상 요약 절대 금지. 원문 톤·문장을 거의 그대로 옮기되 800자에서 자른다. 자연스러운 미완결 (",", " N자 가면,") 로 끝낸다.}</p>
+<h2 data-ke-size="size26">핵심 포인트</h2>
+<ul style="list-style-type: disc;" data-ke-list-type="disc">
   <li>{원문 첫 5~6개 문장 토막. 어시스턴트 추상화 금지. 원문 문장 그대로}</li>
   ...
 </ul>
-
-<h2>원문 보기 (네이버 블로그)</h2>
-<ul>
+<h2 data-ke-size="size26">원문 보기 (네이버 블로그)</h2>
+<ul style="list-style-type: disc;" data-ke-list-type="disc">
   <li>📎 원문 링크: <a href="https://m.blog.naver.com/op5321/{LOG}" target="_blank" rel="noopener">{글 제목}</a></li>
   <li>🌐 PC 링크: <a href="https://blog.naver.com/op5321/{LOG}" target="_blank" rel="noopener">https://blog.naver.com/op5321/{LOG}</a></li>
   <li>📱 모바일 raw URL(구글 크롤러 친화): <code>https://blog.naver.com/PostView.naver?blogId=op5321&amp;logNo={LOG}</code></li>
   <li>🖼️ 이미지 {IMG_COUNT}장</li>
 </ul>
 ```
+
+이스케이프는 `&`, `<`, `>`만 한다. 작은따옴표를 `&#x27;`로 바꾸면 렌더링은 같아도 소스가 정본과 달라진다 (1227은 `'튀어 오르는 형태'`를 원문 그대로 둔다).
+
+**핵심 포인트 선정**: 원문 단락 1~6번을 순서대로 그대로 쓴다. 단 **10자 미만 단락은 건너뛴다**. 게임 감상글에는 "캬", "와", "와 눈빛" 같은 감탄사가 단락으로 들어가 있는데, 이게 불릿에 오르면 요점 목록으로 읽히지 않는다. 감탄사를 뜻이 통하는 문장으로 바꿔 쓰는 건 금지 — 어시스턴트 추상화(안티패턴 3)에 해당한다. 그냥 건너뛰고 다음 단락을 쓴다. (1227 기준으로 이 필터를 적용해도 결과가 동일하다. 6개 불릿이 전부 17자 이상이라 검증된 형식을 깨지 않는다.)
 
 ### 4. 발행 — claude-in-chrome 단발 IIFE
 
@@ -172,6 +205,7 @@ Array.from(document.querySelectorAll('a'))
 - 3개 백링크 모두 (m.blog anchor / blog.naver.com / PostView raw)
 - `🖼️ 이미지 {N}장` 박혀 있음
 - 자기소개 인사 없음
+- **마이그레이션 푸터 없음** — 본문에 `마이그레이션` / `arnopark` / `원본 작성일` 0건
 - 제목 끝 ` | 정리본`
 - **본문 손상 없음** — TinyMCE setContent 가 멀티바이트 한 구간을 산발적으로 깨뜨릴 수 있음 (실측: "원문"→"옐문", "네이버"→"k이버", U+FFFD 혼입). curl 로 `옐문`/`�`(U+FFFD) 0개 + `원문 보기 (네이버 블로그)` 정상 매칭 확인. 깨졌으면 수정 모드(`/manage/post/<id>`)에서 해당 h2 만 정확한 문자열로 교체(`getContent().replace(/<h2[^>]*>[^<]*보기[^<]*<\/h2>/, 정상)` → `setContent` → `save`) 후 재발행.
 
@@ -192,7 +226,24 @@ Array.from(document.querySelectorAll('a'))
 - **태그 input 가려짐** — 사이드바 태그 input은 새 글 페이지 일부 layout에선 안 보이고, 다이얼로그가 가리기도 한다. **자동화하지 않고 수동 보정 단계로 분리**.
 - **네이버 도메인 navigate 불가** — claude-in-chrome MCP는 `*.naver.com`을 안전정책으로 차단. 본문 fetch는 반드시 curl 사용.
 - **네이버 curl 헤더** — iPhone UA + `Referer: https://blog.naver.com/` 필수. 안 그러면 빈 페이지 또는 캡차.
-- **대형 본문 base64 인라인 주입 잘림** — 한글 이스케이프 깨짐 방지로 TITLE/BODY 를 base64 ASCII 로 주입하는데, 본문이 크면(>~2KB, 예: 이미지 수십 장 글) 한 번에 인라인하면 페이로드가 중간에 잘리거나 망가지기 쉽다(실측 사고). **청크로 쪼개 페이지에서 `window.__b += '...'` 로 조립 → b64 길이·시작/끝·마커(h2 3개·이모지 4종·인사 0) 검증 후에만** `setContent`. browser_batch 로 청크 append + 검증을 한 라운드에 묶으면 깔끔.
+- **대형 본문 base64 인라인 주입 잘림** — 한글 이스케이프 깨짐 방지로 TITLE/BODY 를 base64 ASCII 로 주입하는데, 본문이 크면(>~2KB, 예: 이미지 수십 장 글) 한 번에 인라인하면 페이로드가 중간에 잘리거나 망가지기 쉽다(실측 사고). **청크로 쪼개 페이지에서 `window.__b += '...'` 로 조립 → 아래 SHA-256 대조 → 마커(h2 3개·이모지 4종·인사 0) 검증 후에만** `setContent`. browser_batch 로 청크 append + 검증을 한 라운드에 묶으면 깔끔.
+
+- **b64 길이 검증만으로는 부족 — SHA-256을 대조할 것** (2026-07-10 실측). 청크를 도구 호출에 옮겨 적는 과정에서 base64 한 글자가 바뀌면(`Drgpwg` → `Drgnwg`) **길이는 그대로**라 길이 체크를 통과하고, `atob`도 성공한다. 손상은 디코드된 UTF-8에서 U+FFFD 한 글자로만 드러난다. 같은 실행에서 다른 글은 청크가 1200자여야 하는데 1199자로 들어가 `atob`가 InvalidCharacterError로 터졌다 — 즉 오타는 두 방식으로 나타나며 길이 체크는 그중 하나만 잡는다.
+
+  로컬에서 기대 해시를 뽑아 두고:
+  ```bash
+  python3 -c "import json,hashlib; b=json.load(open('chunks.json'))['<LOG>']['chunks']; print(hashlib.sha256(''.join(b).encode()).hexdigest())"
+  ```
+  페이지에서 대조한다. 불일치면 그 청크만 `slice()`로 되감아 다시 넣으면 되고, 발행은 절대 진행하지 않는다:
+  ```javascript
+  window.__sha = async (s) => {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  };
+  const shaOk = (await window.__sha(window.__b)) === '<기대 해시>';
+  if (!shaOk) return {ERROR: 'sha-mismatch'};   // 여기서 ABORT
+  ```
+  청크당 누적 길이(1200, 2400, …)도 같이 반환하면 어느 청크가 틀렸는지 바로 좁혀진다. 해시가 맞으면 디코드 후 `fffd: 0`은 자동으로 따라온다.
 - **TinyMCE setContent 멀티바이트 손상** — 위 '본문 손상 없음' 검증 참조. 산발적이라 같은 코드로 한 글은 멀쩡하고 다른 글은 h2 한 줄이 깨질 수 있음(실측: 1편 정상, 다음 편 "원문→옐문"). **발행 직전 에디터 `getContent` 로 손상 검증(옐문/U+FFFD/`원문 보기` 누락)하고 깨졌으면 ABORT**, 발행 후 curl 재검증.
 
 ## 성공 기준
