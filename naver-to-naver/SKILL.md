@@ -47,6 +47,19 @@ python3 <repo>/blog/scripts/paste_to_naver.py <draft_dir>
 - 사진-먼저·캡션-후·여백 규칙은 paste_to_naver가 자동 적용(`/blog` 스킬과 동일 정본). 제목(`#`)은 본문에서 빠지고 터미널에 출력됨.
 - CGEvent 실제 클릭·키입력이라 **실행 ~1~2분간 사용자가 마우스·키보드를 건드리면 안 됨**을 사전 고지.
 
+### 3.5 스타일 패스 (필수 — 빼먹지 말 것)
+페이스트만 하면 사진이 좌측 정렬·구분선이 기본 단선으로 들어간다. 박기린 글의 정본 스타일은
+**모든 사진 가운데 정렬 + 모든 구분선 line3(가운데 꺾임)+가운데 정렬**이다. paste 직후 반드시 돌린다.
+```bash
+python3 scripts/style_pass.py
+```
+- 순수 합성 JS(osascript `execute javascript`)라 CGEvent 불필요. 컴포넌트를 합성 클릭으로 선택 →
+  property 툴바 렌더 대기 → `button[data-name=align][data-value=center]`(사진),
+  `button[data-name=horizontal-line-layout][data-value=line3]`+center(구분선) 클릭.
+- 처리 전후 카운트를 출력한다(예: `img 49/49 center, hr 13/13 line3`). 하나라도 미처리면 재시도.
+- migrate.py(tistory-to-naver-blog)의 `JS_STYLE_NEXT_IMG`/`JS_STYLE_NEXT_HR` 정본 복제. 이 단계는
+  tistory→naver 마이그레이션에도 있는 6단계 style pass와 동일 — naver→naver라고 생략하면 안 된다.
+
 ### 4. 제목 입력 + 검토 + 발행
 - 제목은 `pbcopy` → 제목칸 클릭 → Cmd+V로 자동 입력(또는 사용자가 붙여넣기).
 - **발행 클릭은 기본 수동**(사용자가 에디터에서 검토 후). "발행까지 해줘" 명시 시에만 `tistory-to-naver-blog` 리포의 `publish_with_category.py <categoryTestId>`로 카테고리 지정+공개 발행.
@@ -98,6 +111,7 @@ python3 <repo>/blog/scripts/paste_to_naver.py <draft_dir>
 - `blog/scripts/paste_to_naver.py`(네이버 페이스트 정본)
 - `~/Desktop/Project/personal/tistory-to-naver-blog/publish_with_category.py`(카테고리+발행 opt-in)
 - `scripts/build_draft.py`(이 스킬 — URL→원본이미지 draft 생성)
+- `scripts/style_pass.py`(이 스킬 — 페이스트 후 사진 가운데정렬 + 구분선 line3, 순수 osascript JS)
 
 ## 관련 스킬·메모리
 - `/tistory-to-naver` — 반대 소스(티스토리→네이버). 네이버 페이스트 기계장치를 공유.
