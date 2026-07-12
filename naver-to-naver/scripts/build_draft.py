@@ -155,6 +155,8 @@ def main():
     ap.add_argument("target")
     ap.add_argument("--blog-id", default=None)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--html", default=None,
+                    help="curl 대신 로컬 HTML 파일을 소스로 사용(네이버 SSR 골격 회피용)")
     args = ap.parse_args()
 
     m = re.search(r"/(\d{8,})", args.target) or re.search(r"logNo=(\d{8,})", args.target)
@@ -169,10 +171,25 @@ def main():
     imgdir.mkdir(parents=True, exist_ok=True)
 
     in_html = draft / "in.html"
-    curl(f"https://m.blog.naver.com/{blog_id}/{log}", out=in_html)
-    if not in_html.exists() or in_html.stat().st_size < 2000:
-        sys.exit("본문 fetch 실패.")
-    html = in_html.read_text(encoding="utf-8", errors="replace")
+    if args.html:
+        html = pathlib.Path(args.html).read_text(encoding="utf-8", errors="replace")
+        in_html.write_text(html, encoding="utf-8")
+    else:
+        curl(f"https://m.blog.naver.com/{blog_id}/{log}", out=in_html)
+        if not in_html.exists() or in_html.stat().st_size < 2000:
+            sys.exit("본문 fetch 실패.")
+        html = in_html.read_text(encoding="utf-8", errors="replace")
+
+    # 네이버 SSR 골격 감지: '내용 문단'(볼드나 큰 폰트 스팬을 가진 = 스페이서가 아닌)이
+    # 비어(zero-width만) 있으면 텍스트가 안 담긴 것. 빈 스페이서 문단(​ ​ ​)은 정상이라 제외.
+    content_p = re.findall(
+        r'<p[^>]*class="se-text-paragraph[^"]*"[^>]*>((?:(?!</p>).)*?(?:<b>|se-fs-fs(?:19|2\d|[3-9]\d))(?:(?!</p>).)*?)</p>',
+        html, re.S)
+    empty_content = sum(1 for p in content_p if not strip_tags(p).replace("​", "").strip())
+    if empty_content >= 4 and empty_content > len(content_p) * 0.15:
+        print(f"[경고] 내용 문단 {len(content_p)}개 중 {empty_content}개가 비어있음 — 네이버 m.blog SSR이 "
+              "긴 글 텍스트를 비운 '골격'을 줬을 수 있음. 브라우저에서 완전본을 저장해 --html 로 주거나 재시도.",
+              file=sys.stderr)
 
     tm = re.search(r'<meta property="og:title" content="([^"]*)"', html)
     title = H.unescape(tm.group(1)) if tm else ""
@@ -206,6 +223,10 @@ def main():
                         stickers += 1
                 else:
                     fail.append(f"{dom}/{path[:50]}")
+            # 미디어 컴포넌트 안에 있는 텍스트(캡션·"짤 출처" 등)도 담는다
+            for t in para_lines(blk):
+                if t:
+                    out.append(t)
         # se-placesMap / se-oglink / se-video 등은 건너뜀(본문 텍스트 오염 방지)
 
     (draft / "script.md").write_text("\n".join(out), encoding="utf-8")
