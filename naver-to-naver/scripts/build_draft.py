@@ -90,6 +90,17 @@ def strip_tags(s):
     return H.unescape(s).replace("\xa0", " ").strip()
 
 
+def bold_md(p):
+    """문단 HTML → 텍스트. 인라인 볼드(`<b>..</b>`)를 `**..**` 마크다운으로 보존.
+    paste_to_naver가 `**..**`를 <b>로 렌더하므로 문장 중 일부 볼드까지 살아남는다."""
+    def repl(m):
+        inner = re.sub(r"<[^>]+>", "", m.group(1)).replace("​", "").strip()
+        return f"**{inner}**" if inner else ""
+    s = re.sub(r"<b>(.*?)</b>", repl, p, flags=re.S)
+    s = re.sub(r"<[^>]+>", "", s)
+    return H.unescape(s).replace("​", "").replace("\xa0", " ").strip()
+
+
 def components(html):
     """se-component 블록을 DOM 순서로 산출: (kind, block)."""
     starts = [m.start() for m in re.finditer(r'<div class="se-component ', html)]
@@ -135,7 +146,7 @@ def para_lines(blk):
         elif size >= 20:
             out.append(f"### {t}")     # 배경없는 큰 볼드(감탄 강조) → 19px 볼드, 노랑 아님
         else:
-            out.append(t)
+            out.append(bold_md(p))     # 본문: 인라인 볼드(<b>) 를 **볼드**로 보존
     return out if out else [strip_tags(blk).replace("​", "").strip()]
 
 
