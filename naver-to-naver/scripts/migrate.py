@@ -520,8 +520,12 @@ def highlight_pass(hl_texts):
 
 def set_title(title):
     xy_js = '(function(){var tt=document.querySelector(".se-documentTitle .se-text-paragraph, .se-documentTitle");tt.scrollIntoView({block:"center"});var r=tt.getBoundingClientRect();return JSON.stringify({x:Math.round(window.screenX+r.left+r.width/2),y:Math.round(window.screenY+(window.outerHeight-window.innerHeight)+r.top+r.height/2)});})()'
-    subprocess.run(["pbcopy"], input=title.encode())
-    for attempt in range(4):
+    for attempt in range(3):                     # 제목 검증은 최대 3회(사용자 지시)
+        subprocess.run(["pbcopy"], input=title.encode())
+        time.sleep(0.3)
+        clip = subprocess.run(["pbpaste"], capture_output=True, text=True).stdout
+        if clip.strip() != title.strip():        # 다른 프로세스가 클립보드를 덮었으면 재복사
+            continue
         c = json.loads(chrome_js(xy_js))         # 시도마다 좌표 재계산(스크롤·레이아웃 변동 대응)
         click_at(c["x"], c["y"], clicks=1)       # 단일클릭으로 캐럿 먼저(실측: 바로 트리플이면 씹힘)
         time.sleep(0.8)
