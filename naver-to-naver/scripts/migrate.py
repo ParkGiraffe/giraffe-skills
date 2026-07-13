@@ -200,7 +200,15 @@ def render_paragraph(p_attrs, p_inner):
     elif "se-text-paragraph-align-right" in p_attrs:
         align = ' align="right"'
     spans, plain_all, is_hl = [], "", False
+    pos = 0
     for sm in SPAN_RE.finditer(p_inner):
+        # 스팬 사이 텍스트 노드 보존 — 해시태그는 <span>#태그</span> <span>#태그</span>처럼
+        # 스팬 '사이'의 공백으로 구분된다. 버리면 #태그#태그로 붙어 네이버 태그 자동인식이 깨짐(실사고).
+        gap = _plain(p_inner[pos:sm.start()])
+        pos = sm.end()
+        if gap:
+            spans.append(esc(gap))
+            plain_all += gap.strip()
         sattr, sinner = sm.group(1), sm.group(2)
         fsm = re.search(r"se-fs-fs(\d+)", sattr)
         fs = int(fsm.group(1)) if fsm else 15
@@ -209,9 +217,12 @@ def render_paragraph(p_attrs, p_inner):
         if re.search(r"background-color:\s*#[0-9a-fA-F]{3,8}", sattr):
             is_hl = True                          # 노란배경 소제목 — 나중에 하이라이트 패스로 입힘
         inner = render_inner(sinner)
-        plain = re.sub(r"<[^>]+>", "", inner).strip()
+        raw = re.sub(r"<[^>]+>", "", inner)
+        plain = raw.strip()
         plain_all += plain
         if not plain:
+            if raw:                        # 공백만 있는 스팬도 구분 공백으로 보존
+                spans.append(" ")
             continue
         whole_b = bool(re.fullmatch(r"\s*<b>.*</b>\s*", sinner, re.S))
         # background-color는 절대 넣지 않는다(transparent 포함) — SE paste 파이프라인이
@@ -221,6 +232,10 @@ def render_paragraph(p_attrs, p_inner):
         if not whole_b:
             style = "font-weight:normal;" + style
         spans.append(f'<span style="{style}">{inner}</span>')
+    tail = _plain(p_inner[pos:]) if pos else ""
+    if tail.strip():
+        spans.append(esc(tail))
+        plain_all += tail.strip()
     if not plain_all.strip():
         return "<p><br></p>", "", False
     return f"<p{align}>{''.join(spans)}</p>", plain_all.strip(), is_hl
