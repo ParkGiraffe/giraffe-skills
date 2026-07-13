@@ -34,6 +34,8 @@ UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 REFERER = "https://blog.naver.com/"
 CACHE = pathlib.Path.home() / ".cache" / "naver-to-naver"
+ORIG = CACHE / "orig"
+USE_CENSORED = False   # --censored 명시 시에만 가려진 캐시 사용(검열은 사용자가 직접 요청할 때만)
 
 MEDIA_RE = re.compile(r'https?://([a-z0-9-]+\.pstatic\.net)/([^"?\s\\]+\.(?:jpe?g|png|gif))', re.I)
 P_RE = re.compile(r'<p([^>]*class="se-text-paragraph[^"]*"[^>]*)>(.*?)</p>', re.S)
@@ -124,6 +126,9 @@ def download_original(dom, path):
     ext = pathlib.Path(path).suffix.lower() or ".jpg"
     dest = CACHE / (hashlib.sha1(path.encode()).hexdigest()[:20] + ext)
     if dest.exists() and dest.stat().st_size > 500:
+        bak = ORIG / dest.name
+        if not USE_CENSORED and bak.exists():
+            return bak                     # 검열본이 캐시에 있어도 기본은 원본(명시 요청시에만 검열)
         return dest
     if "storep-phinf" in dom:                     # OGQ 스티커: type 필수, HEAD 미지원
         for q in ("?type=p100_100", "?type=f120_120"):
@@ -627,6 +632,9 @@ def main():
     ap.add_argument("--blog-id", default=None)
     ap.add_argument("--html", default=None)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--censored", action="store_true",
+                    help="가려진(검열) 캐시 이미지 사용 — 사용자가 명시적으로 요청할 때만")
+    ap.add_argument("--title", default=None, help="제목 덮어쓰기(예: 화수 변경 재발행)")
     args = ap.parse_args()
 
     m = re.search(r"/(\d{8,})", args.target) or re.search(r"logNo=(\d{8,})", args.target)
@@ -637,8 +645,12 @@ def main():
     blog_id = args.blog_id or (bm.group(1) if bm else "op5321")
 
     src = fetch_source(blog_id, log, args.html)
+    global USE_CENSORED
+    USE_CENSORED = args.censored
+    if args.censored:
+        print("[주의] --censored: 가려진 캐시 이미지 사용")
     tm = re.search(r'<meta property="og:title" content="([^"]*)"', src)
-    title = H.unescape(tm.group(1)) if tm else ""
+    title = args.title or (H.unescape(tm.group(1)) if tm else "")
 
     chunks, stats, hl_texts = build_chunks(src)
     src_paras, missing = verify_chunks_vs_source(src, chunks)

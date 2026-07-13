@@ -69,7 +69,8 @@ python3 scripts/migrate.py <네이버_글_URL_또는_logNo> [--blog-id op5321] [
 - 네이버 쓰기 자동화는 osascript+CGEvent만 유효(claude-in-chrome은 `*.naver.com` 하드블록).
 
 ## 노출 가이드라인 대응 (재발행 시 가리기)
-살 노출로 검색이 막힌 글은 재발행 전에 이미지를 가린다 — 전용 스킬 `/naver-photo-censor` 사용
+검열은 **사용자가 직접 명시할 때만** 한다(기본 마이그레이션은 항상 원본 이미지 — 검열본이 캐시에
+있어도 `--censored` 플래그 없이는 원본 백업을 쓴다). 명시 요청 시 전용 스킬 `/naver-photo-censor` 사용
 (격자 싱글 좌표 판독 → 부위별 회색 박스 → 전 장 실물 검수 통과 후 진행). 가려진 캐시를 이
 스킬의 migrate.py가 그대로 사용한다. 색인 회복 확인은 `/naver-search-check`.
 
