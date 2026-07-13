@@ -136,13 +136,21 @@ INLINE_CODE_STYLE = (
 )
 
 
+# 인라인 코드(`...`) 또는 인라인 볼드(**...**). 문장 중간 일부만 볼드인 경우까지 커버
+# (BOLD_LINE_RE는 단락 '전체'가 볼드일 때만 매칭하므로 인라인은 여기서 처리).
+_INLINE_RE = re.compile(r"`([^`]+)`|\*\*([^*]+?)\*\*")
+
+
 def _render_inline(text: str) -> str:
-    """HTML 이스케이프 + 인라인 코드(`...`)를 스타일 span으로 변환."""
+    """HTML 이스케이프 + 인라인 코드(`...`)·인라인 볼드(**...**)를 span/<b>로 변환."""
     out = []
     pos = 0
-    for m in INLINE_CODE_RE.finditer(text):
+    for m in _INLINE_RE.finditer(text):
         out.append(_html_escape(text[pos:m.start()]))
-        out.append(f'<span style="{INLINE_CODE_STYLE}">{_html_escape(m.group(1))}</span>')
+        if m.group(1) is not None:                       # 인라인 코드
+            out.append(f'<span style="{INLINE_CODE_STYLE}">{_html_escape(m.group(1))}</span>')
+        else:                                            # 인라인 볼드
+            out.append(f"<b>{_html_escape(m.group(2))}</b>")
         pos = m.end()
     out.append(_html_escape(text[pos:]))
     return "".join(out)
