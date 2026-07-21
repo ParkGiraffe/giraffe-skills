@@ -127,6 +127,9 @@ def heading_html(text: str, level: int = 2) -> str:
 
 
 BOLD_LINE_RE = re.compile(r"^\*\*([^*].*?)\*\*$")
+# 리스트 항목(- / * / 1.): 각각 별도 문단으로 렌더 (md_to_smarteditor와 동일).
+# 없으면 연속 항목이 flush_para에서 한 줄로 합쳐진다 (2026-07-16 리스트 뭉침 버그).
+LIST_RE = re.compile(r"^\s*([-*]|\d+\.)\s+(.+)$")
 
 # 인라인 코드(`...`): 노션풍 회색 배경 + 붉은 글자 span으로 렌더 (2026-07-07)
 INLINE_CODE_RE = re.compile(r"`([^`]+)`")
@@ -157,11 +160,14 @@ def _render_inline(text: str) -> str:
 
 
 def body_html(text: str) -> str:
-    # 단락 전체가 **...** 로 감싸진 경우 본문 볼드로 렌더 (예: 방문일/버그 발생일 기록)
+    # 단락 전체가 **...** 인 경우 절 제목(소제목, 19px 볼드)으로 렌더.
+    # md_to_smarteditor.py의 subheading(fs19)과 일치시킨다 — 예전엔 15px 본문
+    # 볼드였는데, preview(md_to_smarteditor)와 실제 업로드가 달라 소제목이
+    # 본문 크기로 나오는 사고가 났다 (2026-07-16 사용자 지적).
     b = BOLD_LINE_RE.match(text)
     if b:
         t = _render_inline(b.group(1).strip())
-        return f'<p><span style="{BODY_SPAN_STYLE}"><b>{t}</b></span></p>'
+        return f'<p><span style="{SUBHEADING_SPAN_STYLE}"><b>{t}</b></span></p>'
     t = _render_inline(text)
     return f'<p><span style="{BODY_SPAN_STYLE}">{t}</span></p>'
 
@@ -254,6 +260,14 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             else:
                 tokens.append(("p", f"[스크린샷: {ph.group(1).strip()}]"))
             continue
+        lst = LIST_RE.match(line)
+        if lst:
+            # 리스트 항목은 각각 별도 문단 토큰으로 (한 줄로 뭉치지 않게)
+            flush_para()
+            marker = lst.group(1)
+            bullet = "• " if marker in ("-", "*") else f"{marker} "
+            tokens.append(("li", bullet + lst.group(2).strip()))
+            continue
         para.append(line)
     flush_para()
 
@@ -317,11 +331,20 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             for seg in tok[1]:
                 elements.append(("html", body_html(seg)))
             typ = "p"  # 이후 여백 판단에는 일반 문단으로 취급
+        elif typ == "li":  # 리스트 항목: 각각 별도 문단, 항목끼리는 딱 붙임
+            if prev_type == "li":
+                n = 0                  # 리스트 항목 사이 여백 0
+            elif prev_type == "p":
+                n = 1                  # 도입 문단 ↔ 리스트 첫 항목 1줄
+            else:                      # img, h, hr, None
+                n = 0
+            blanks(n)
+            elements.append(("html", body_html(tok[1])))
         else:  # 'p' (사진 아래 설명글)
             if prev_type in ("img", "h"):
                 n = 0                  # 설명글은 사진/소제목 바로 밑에 딱 붙임
-            elif prev_type == "p":
-                n = 1                  # 연속 문단 사이 1줄
+            elif prev_type in ("p", "li"):
+                n = 1                  # 연속 문단 사이, 리스트 끝난 뒤 새 문단 1줄
             else:
                 n = 0
             blanks(n)
