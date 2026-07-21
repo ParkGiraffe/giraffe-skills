@@ -138,24 +138,55 @@ INLINE_CODE_STYLE = (
     "border-radius:3px;padding:1px 4px;"
 )
 
-
-# 인라인 코드(`...`) 또는 인라인 볼드(**...**). 문장 중간 일부만 볼드인 경우까지 커버
-# (BOLD_LINE_RE는 단락 '전체'가 볼드일 때만 매칭하므로 인라인은 여기서 처리).
-_INLINE_RE = re.compile(r"`([^`]+)`|\*\*([^*]+?)\*\*")
+# 인라인 서식 전체 (giraffe-editor의 마크 집합과 1:1, 2026-07-21):
+#   `code`, ***bold italic***, **bold**, *italic*, <u>, <mark>,
+#   <span style="color:#xxx;">, [text](href)
+_INLINE_TOKEN_RE = re.compile(
+    r"(`[^`]+`)"
+    r"|(\*\*\*[^*]+\*\*\*)"
+    r"|(\*\*[^*]+\*\*)"
+    r"|(\*[^*]+\*)"
+    r"|(<u>.+?</u>)"
+    r"|(<mark>.+?</mark>)"
+    r"|(<span style=\"color:[^\"]+\">.+?</span>)"
+    r"|(\[[^\]]+\]\([^)\s]+\))"
+)
 
 
 def _render_inline(text: str) -> str:
-    """HTML 이스케이프 + 인라인 코드(`...`)·인라인 볼드(**...**)를 span/<b>로 변환."""
+    """HTML 이스케이프 + 인라인 서식을 네이버가 보존하는 스타일로 변환."""
     out = []
-    pos = 0
-    for m in _INLINE_RE.finditer(text):
-        out.append(_html_escape(text[pos:m.start()]))
-        if m.group(1) is not None:                       # 인라인 코드
-            out.append(f'<span style="{INLINE_CODE_STYLE}">{_html_escape(m.group(1))}</span>')
-        else:                                            # 인라인 볼드
-            out.append(f"<b>{_html_escape(m.group(2))}</b>")
-        pos = m.end()
-    out.append(_html_escape(text[pos:]))
+    last = 0
+    for m in _INLINE_TOKEN_RE.finditer(text):
+        if m.start() > last:
+            out.append(_html_escape(text[last:m.start()]))
+        token = m.group(0)
+        if m.group(1):
+            out.append(f'<span style="{INLINE_CODE_STYLE}">{_html_escape(token[1:-1])}</span>')
+        elif m.group(2):
+            out.append(f"<b><i>{_render_inline(token[3:-3])}</i></b>")
+        elif m.group(3):
+            out.append(f"<b>{_render_inline(token[2:-2])}</b>")
+        elif m.group(4):
+            out.append(f"<i>{_render_inline(token[1:-1])}</i>")
+        elif m.group(5):
+            out.append(f"<u>{_render_inline(token[3:-4])}</u>")
+        elif m.group(6):
+            out.append(
+                '<span style="background-color:#fff593;">'
+                f"{_render_inline(token[6:-7])}</span>"
+            )
+        elif m.group(7):
+            open_end = token.index('">') + 2
+            out.append(f"{token[:open_end]}{_render_inline(token[open_end:-7])}</span>")
+        elif m.group(8):
+            close = token.index("](")
+            label = _render_inline(token[1:close])
+            href = _html_escape(token[close + 2:-1])
+            out.append(f'<a href="{href}" target="_blank">{label}</a>')
+        last = m.end()
+    if last < len(text):
+        out.append(_html_escape(text[last:]))
     return "".join(out)
 
 
