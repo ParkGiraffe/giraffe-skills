@@ -38,12 +38,14 @@ def render_inline(text: str) -> str:
     return "".join(out)
 
 
-def text_component(text: str, *, heading: bool = False, bold: bool = False, align: str = "") -> str:
+def text_component(text: str, *, heading: bool = False, subheading: bool = False,
+                   bold: bool = False, align: str = "") -> str:
     cid = uid()
     pid = uid()
     sid = uid()
-    fs = "fs24" if heading else ""
-    inner = f"<b>{render_inline(text)}</b>" if (heading or bold) else render_inline(text)
+    # 장 제목(##)=fs24, 절 제목(전체 라인 볼드)=fs19, 평문=크기 없음
+    fs = "fs24" if heading else ("fs19" if subheading else "")
+    inner = f"<b>{render_inline(text)}</b>" if (heading or subheading or bold) else render_inline(text)
     return f'''<div class="se-component se-text se-l-default" id="{cid}">
 <div class="se-component-content">
 <div class="se-section se-section-text se-l-default">
@@ -107,6 +109,7 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 HR_RE = re.compile(r"^\s*---\s*$")
 QUOTE_RE = re.compile(r"^>\s*(.*)$")
 BOLD_LINE_RE = re.compile(r"^\*\*([^*].*?)\*\*\s*$")
+LIST_RE = re.compile(r"^\s*([-*]|\d+\.)\s+(.+)$")
 
 
 def parse_frontmatter(src: str) -> tuple[dict, str]:
@@ -279,10 +282,20 @@ def convert(src: str, images_dir: pathlib.Path | None = None,
                 components.append(placeholder_component(label))
             i += 1
             continue
+        lst = LIST_RE.match(line)
+        if lst:
+            # 리스트 항목은 각각 별도 문단으로 (한 줄로 뭉치지 않게)
+            flush_para()
+            marker = lst.group(1)
+            bullet = "• " if marker in ("-", "*") else f"{marker} "
+            components.append(text_component(bullet + lst.group(2).strip()))
+            i += 1
+            continue
         b = BOLD_LINE_RE.match(line)
         if b:
+            # 전체 라인 볼드(**...**)는 절 제목으로 (평문보다 큰 글씨)
             flush_para()
-            components.append(text_component(b.group(1).strip(), bold=True))
+            components.append(text_component(b.group(1).strip(), subheading=True))
             i += 1
             continue
         q = QUOTE_RE.match(line)
@@ -312,6 +325,7 @@ body {{ max-width: 720px; margin: 2rem auto; font-family: -apple-system, sans-se
 .se-documentTitle p span {{ font-size: 28px; font-weight: 700; }}
 .se-section-text p {{ margin: 0.8em 0; }}
 .se-fs-fs24 b {{ font-size: 22px; background: #fff593; padding: 2px 4px; }}
+.se-fs-fs19 b {{ font-size: 18px; font-weight: 700; }}
 .se-image-resource {{ max-width: 100%; display: block; margin: 1em auto; }}
 .se-hr {{ border: none; border-top: 1px solid #ccc; margin: 2em 0; }}
 .blog_category a {{ color: #1ec800; text-decoration: none; font-size: 14px; }}
