@@ -52,6 +52,20 @@ python3 scripts/migrate.py <네이버_글_URL_또는_logNo> [--blog-id op5321] [
 - 파일명 `_s.jpg`는 `_s` 뗀 경로도 후보. 다운로드는 `~/.cache/naver-to-naver`에 캐시.
 
 ## 함정 (전부 실측 — 어기면 재발한다)
+- **Chrome 페이지 확대율이 100%가 아니면 좌표가 전부 어긋난다 (2026-07-30 실측).**
+  확대율은 사이트별로 저장되므로 blog.naver.com만 110%인 상태가 조용히 유지되고, 다른 컴퓨터에서는
+  100%라 재현되지 않는다. 화면좌표 환산은 `screenY + (outerHeight-innerHeight) + rect.top`인데
+  이 식은 CSS 픽셀과 화면 포인트가 1:1일 때만 성립한다. 110%에서는 `outerHeight-innerHeight`가
+  183으로 잡히지만 실제 크롬 UI 높이는 121이라 클릭이 세로로 39포인트 밀린다. 증상은 두 가지로
+  나타난다: 하이라이트가 겨눈 소제목 대신 바로 아래 문단에 칠해지고 타깃은 계속 미적용으로 남아
+  같은 문단을 11~12회 반복한다. 그리고 여백에 떨어진 클릭을 SE가 제목칸 입력으로 라우팅해
+  캐럿이 제목에 고착된다. 진단은 `outerWidth/innerWidth`(1.0이어야 정상)와
+  `devicePixelRatio`(Retina에서 2.0, 110%면 2.2)로 한다. `window.screen.width`는 확대와
+  무관하게 포인트를 보고하므로 확대율 판정에 쓰면 오판한다.
+  `migrate.py`가 `reset_zoom()`으로 Cmd+0을 보내고 `verify_coords()`로 마우스 이동 한 번을 보내
+  보낸 화면좌표와 브라우저가 받은 clientX/clientY를 대조한다. 오차 3포인트를 넘으면 붙여넣기 전에
+  중단한다. 하이라이트도 트리플클릭 직후 `window.getSelection()`으로 겨눈 문단이 맞는지 확인한 뒤
+  색을 칠한다.
 - **background-color를 paste HTML에 넣지 말 것(transparent 포함).** 연속 붙여넣기 중 SE가 하이라이트를
   이후 모든 문단에 고착시켜 글 전체가 노랗게 된다(47/8 사고). 노란배경은 반드시 하이라이트 패스로.
 - **Cmd+Z로 수리하지 말 것.** undo granularity가 붙여넣기 단위가 아니라 이전 청크까지 되돌려 손상시킨다.

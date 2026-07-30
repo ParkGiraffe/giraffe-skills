@@ -338,6 +338,55 @@ def open_fresh_editor(blog_id):
     time.sleep(1)
 
 
+def reset_zoom():
+    """Chrome 페이지 확대율을 100%로 되돌린다.
+
+    확대율은 사이트별로 저장되므로 blog.naver.com만 110%인 상태가 조용히 유지된다.
+    이 스크립트의 화면좌표 환산(screenY + (outerHeight-innerHeight) + rect.top)은
+    CSS 픽셀과 화면 포인트가 1:1일 때만 성립한다. 110%면 그 비율만큼 좌표가 아래로
+    밀려 클릭이 글자 대신 여백에 떨어지고, SE는 여백 클릭을 제목칸 입력으로 라우팅한다.
+    2026-07-30 실측: 110% → 세로 39포인트 밀림 → 하이라이트가 겨눈 소제목 대신 다음 문단에
+    칠해지고 같은 문단을 11~12회 반복, 제목칸에 캐럿 고착.
+    """
+    osa('tell application "System Events" to keystroke "0" using command down')
+    time.sleep(1.2)
+
+
+def verify_coords():
+    """화면좌표 환산이 실제로 맞는지 마우스 이동 한 번으로 검증한다(클릭 아님).
+
+    브라우저는 mousemove 이벤트로 그 지점의 clientX/clientY를 알려주므로,
+    보낸 화면좌표와 공식이 예측한 값을 직접 대조할 수 있다. 확대율뿐 아니라
+    디스플레이 배치·크롬 UI 높이 변화까지 한 번에 걸러낸다.
+    """
+    chrome_js('(function(){window.__xy=null;if(!window.__xyOn){'
+              'document.addEventListener("mousemove",function(e){window.__xy=[e.clientX,e.clientY];},true);'
+              'window.__xyOn=1;}return "ok";})()')
+    base = json.loads(chrome_js('JSON.stringify({sx:window.screenX,sy:window.screenY,'
+                                'off:window.outerHeight-window.innerHeight,'
+                                'w:window.innerWidth,h:window.innerHeight})'))
+    sx, sy, off = base["sx"], base["sy"], base["off"]
+    worst = 0
+    for fx, fy in ((0.35, 0.35), (0.35, 0.75)):
+        X = round(sx + base["w"] * fx)
+        Y = round(sy + off + base["h"] * fy)
+        ev = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, (X, Y), Quartz.kCGMouseButtonLeft)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+        time.sleep(0.45)
+        r = chrome_js("JSON.stringify(window.__xy)")
+        if r in ("null", ""):
+            sys.exit("[좌표] mousemove가 창에 도달하지 않음 — Chrome 창이 화면 밖이거나 가려져 있음")
+        cx, cy = json.loads(r)
+        dx, dy = X - (sx + cx), Y - (sy + off + cy)
+        worst = max(worst, abs(dx), abs(dy))
+        print(f"    [좌표] 보낸({X},{Y}) → client({cx},{cy}) 오차({dx:+},{dy:+})")
+    if worst > 3:
+        sys.exit(f"[좌표] 화면좌표 환산 오차 {worst}포인트 — 붙여넣기 중단.\n"
+                 f"       Chrome 확대율을 100%로 두세요(Cmd+0). 확대 상태면 클릭이 여백에 떨어져\n"
+                 f"       입력이 제목칸으로 라우팅되고 하이라이트가 엉뚱한 문단에 칠해집니다.")
+    print(f"[좌표] 환산 검증 OK (최대 오차 {worst}포인트)")
+
+
 def body_coords():
     # 본문 '문단 텍스트 자체'의 중앙을 클릭해야 SE가 캐럿을 본문에 둔다.
     # 섹션 top+40 같은 여백 좌표를 클릭하면 SE가 입력을 제목으로 라우팅한다(실측 사고).
@@ -512,8 +561,16 @@ def highlight_pass(hl_texts):
               'if(!p)return "done";p.scrollIntoView({block:"center"});var r=p.getBoundingClientRect();'
               'return JSON.stringify({x:Math.round(window.screenX+r.left+Math.min(60,r.width/3)),'
               'y:Math.round(window.screenY+(window.outerHeight-window.innerHeight)+r.top+r.height/2),'
-              't:(p.innerText||"").slice(0,20)});})()')
+              't:(p.innerText||"").slice(0,20),n:(p.innerText||"").replace(/\\s+/g,"")});})()')
         return chrome_js(js)
+
+    def selected_text():
+        """트리플클릭이 실제로 어느 문단을 잡았는지 되읽는다(색을 칠하기 전에 확인)."""
+        return chrome_js('(function(){var s=window.getSelection();'
+                         'if(!s||s.rangeCount===0)return "";'
+                         'var n=s.anchorNode,el=n&&(n.nodeType===1?n:n.parentElement);'
+                         'var p=el&&el.closest?el.closest(".se-text-paragraph"):null;'
+                         'return p?(p.innerText||"").replace(/\\s+/g,""):"";})()')
 
     applied = 0
     for _ in range(len(hl_texts) * 3 + 3):
@@ -529,6 +586,12 @@ def highlight_pass(hl_texts):
         time.sleep(0.4)
         click_at(c["x"], c["y"], clicks=3)           # 트리플클릭 = 문단 선택(신뢰 이벤트)
         time.sleep(0.6)
+        got = selected_text()                        # 색을 칠하기 전에 겨눈 문단이 맞는지 확인
+        if got != c["n"]:
+            sys.exit(f"[highlight] 선택이 어긋남 — 중단.\n"
+                     f"       겨눈 문단: {c['n'][:30]}\n"
+                     f"       실제 선택: {got[:30] or '(선택 없음)'}\n"
+                     f"       클릭이 여백/다음 문단에 떨어졌습니다. Chrome 확대율을 100%로 두세요(Cmd+0).")
         chrome_js('(function(){var b=Array.from(document.querySelectorAll("button[data-name=background-color]")).find(function(x){return x.offsetParent;});if(b)b.click();return "ok";})()')
         time.sleep(0.6)
         chrome_js('(function(){var sw=Array.from(document.querySelectorAll("[data-value], [data-color]")).find(function(x){return x.offsetParent&&((x.getAttribute("data-value")||x.getAttribute("data-color"))==="#fff593");});if(sw)sw.click();return "ok";})()')
@@ -546,7 +609,11 @@ def set_title(title):
         clip = subprocess.run(["pbpaste"], capture_output=True, text=True).stdout
         if clip.strip() != title.strip():        # 다른 프로세스가 클립보드를 덮었으면 재복사
             continue
-        c = json.loads(chrome_js(xy_js))         # 시도마다 좌표 재계산(스크롤·레이아웃 변동 대응)
+        try:                                     # 시도마다 좌표 재계산(스크롤·레이아웃 변동 대응)
+            c = json.loads(chrome_js(xy_js))     # JS가 빈 응답/에러를 주면 죽지 말고 재시도
+        except json.JSONDecodeError:
+            time.sleep(1.0)
+            continue
         click_at(c["x"], c["y"], clicks=1)       # 단일클릭으로 캐럿 먼저(실측: 바로 트리플이면 씹힘)
         time.sleep(0.8)
         click_at(c["x"], c["y"], clicks=3)       # 트리플클릭(전체선택) 후 붙여넣기 = 교체라 중복 없음
@@ -670,6 +737,8 @@ def main():
 
     print(f"[진행] 새 글쓰기 창에 {len(chunks)}청크 복붙 — 마우스·키보드 금지")
     open_fresh_editor(blog_id)
+    reset_zoom()
+    verify_coords()
     focus_body()
     paste_all(chunks)
     style_pass()
