@@ -136,7 +136,7 @@ python3 ~/.claude/skills/blog/scripts/paste_to_naver.py \
 - **임시저장 다이얼로그**: 뜨면 JS로 `취소` 버튼 클릭해 닫음 (`.se-popup button`).
 - **포커스·캐럿**: SmartEditor는 합성 이벤트를 isTrusted로 거부 — 실제 입력이 필요한 동작(본문 클릭, 선택, Backspace, Cmd+V)은 Quartz CGEvent로 쏨. 좌표는 JS로 `window.screenX + rect.left`, `window.screenY + (outerHeight - innerHeight) + rect.top` 계산. 클릭 전 `scrollIntoView({block:'center'})`.
 - **제목 자동 입력**: 제목을 `pbcopy` → CGEvent로 제목칸 클릭 → Cmd+V. 터미널 출력 복붙 수동 단계 없음.
-- **코드블록**: 본문에 placeholder를 남기고 `~/Desktop/Project/personal/tistory-to-naver-blog/inject_code_blocks.py` 방식(툴바 `button[data-name=code]` JS 클릭 + `.se-code-source-editor` textarea native value setter + input 이벤트)으로 native `se-code` 컴포넌트 삽입.
+- **코드블록**: 본문에 placeholder를 남기고 리포 공용 `_lib/inject_code_blocks.py` 방식(툴바 `button[data-name=code]` JS 클릭 + `.se-code-source-editor` textarea native value setter + input 이벤트)으로 native `se-code` 컴포넌트 삽입.
 
 **자동 실행 흐름** (사용자 액션 0회):
 1. Claude: postwrite 탭 확보 (없으면 열기) + 임시저장 다이얼로그 JS로 취소

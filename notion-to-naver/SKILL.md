@@ -23,7 +23,7 @@ Notion에 정리해 둔 글(버그수정 일지, 지식창고 문서 등)을 네
 
 - 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에 터미널(또는 iTerm) 체크 (Cmd+V 자동 전송)
 - Chrome 메뉴 바 → 보기 → 개발자 → "Apple Events의 자바스크립트 허용" 체크 (코드블록 inject용)
-- 매크로 도구: `~/Desktop/Project/personal/tistory-to-naver-blog/` (inject_code_blocks.py)
+- 매크로 도구: 리포 공용 `_lib/inject_code_blocks.py`, 스타일 패스는 `tistory-to-naver/scripts/migrate.py`
 
 ## 절차
 
@@ -77,10 +77,10 @@ blog/SKILL.md 7-1 자동 흐름 그대로:
    (이미지는 meta.json `images.source_folder`에서 자동 로드, 파일 URL 클립보드 방식이라 네이버가 자동 업로드)
 3. 코드블록 inject:
    ```bash
-   python3 ~/Desktop/Project/personal/tistory-to-naver-blog/inject_code_blocks.py
+   python3 <giraffe-skills 리포 루트>/_lib/inject_code_blocks.py
    ```
-   (기본 사이드카 경로 `/tmp/naver_code_blocks.json` 사용. 언어 표기는 기본 javascript — 다르면 에디터에서 수동 변경)
-4. **스타일 패스** (빼먹기 쉬움 — 2026-07-07 첫 실행 때 누락): migrate.py의 `style_pass()` 호출로 모든 구분선을 line3(가운데 꺾임)+가운데 정렬, 모든 사진을 가운데 정렬로. 합성 JS만 쓰므로 전면 앱 무관. 실행 후 셀렉터로 적용 여부 검증.
+   (기본 사이드카 경로 `/tmp/naver_code_blocks.json` 사용. 언어 표기는 기본 javascript라 다르면 에디터에서 수동 변경)
+4. **스타일 패스** (빼먹기 쉽다. 2026-07-07 첫 실행 때 누락): `tistory-to-naver/scripts/migrate.py`의 `style_pass()` 호출로 모든 구분선을 line3(가운데 꺾임)+가운데 정렬, 모든 사진을 가운데 정렬로. 합성 JS만 쓰므로 전면 앱 무관. 실행 후 셀렉터로 적용 여부 검증.
 5. 제목 자동 입력 (pbcopy → 제목칸 클릭 → Cmd+V)
 
 ### 6. 발행 — 개발 글은 비공개
@@ -115,7 +115,7 @@ curl -s -A "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)" "https://m.b
 
 ## 관련 스킬 / 의존
 
-- `blog` — paste_to_naver.py·md_to_smarteditor.py 정본, 전사 모드·여백 규칙·osascript 오케스트레이션 상세
-- `tistory-to-naver` — 코드블록 inject 원리, 발행 레이어 DOM 셀렉터, migrate 파이프라인
-- `blog-title` — 제목 후보 뽑기
-- 외부: `~/Desktop/Project/personal/tistory-to-naver-blog/` (inject_code_blocks.py)
+- `blog`: paste_to_naver.py·md_to_smarteditor.py 정본, 전사 모드·여백 규칙·osascript 오케스트레이션 상세
+- `tistory-to-naver`: 코드블록 inject 원리, 발행 레이어 DOM 셀렉터, migrate 파이프라인
+- `blog-title`: 제목 후보 뽑기
+- 리포 공용 `_lib/inject_code_blocks.py` (2026-07-30 외부 리포에서 흡수)

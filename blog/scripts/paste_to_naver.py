@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Paste a blog draft's script.md into the focused Naver blog editor.
 
-Directly adapted from the proven-working auto mode in
-https://github.com/ParkGiraffe/tistory-to-naver-blog (run_migration.py +
-migrate_from_url.py). Core differences:
+Directly adapted from the proven-working auto mode in the tistory migration
+engine, now vendored into this repo at tistory-to-naver/scripts/
+(run_migration.py + migrate_from_url.py). Core differences:
   - Parses a local script.md instead of fetching a Tistory URL.
   - Images are already local files; no download step.
 

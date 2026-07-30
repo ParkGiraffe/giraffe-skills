@@ -4,3 +4,6 @@ __pycache__/
 .DS_Store
 .omc/
 .claude/
+
+# migrate_from_url.py가 마이그레이션마다 이미지를 받아두는 스크래치 폴더
+tistory-to-naver/scripts/images/
