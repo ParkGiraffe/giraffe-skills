@@ -72,8 +72,8 @@ def cmd_v():
 
 
 # ---------------------------------------------------------------- fetch
-def curl(url, out=None):
-    cmd = ["curl", "-sSL", "-A", UA, "-e", REFERER]
+def curl(url, out=None, ua=None):
+    cmd = ["curl", "-sSL", "-A", ua or UA, "-e", REFERER]
     if out:
         cmd += ["-o", str(out)]
     cmd.append(url)
@@ -90,17 +90,46 @@ def content_complete(html):
     return not (empty >= 4 and ps and empty > len(ps) * 0.15)
 
 
+def paragraph_texts(html):
+    """내용이 있는 텍스트 문단의 정규화 텍스트 목록(렌더러 간 대조용)."""
+    out = []
+    for p in re.findall(r'<p[^>]*class="se-text-paragraph[^"]*"[^>]*>((?:(?!</p>).)*?)</p>',
+                        html, re.S):
+        t = re.sub(r"\s+", "", _plain(p))
+        if t:
+            out.append(t)
+    return out
+
+
 def fetch_source(blog_id, log, html_path=None, retries=8):
     if html_path:
         return pathlib.Path(html_path).read_text(encoding="utf-8", errors="replace")
+    best = ""
     for i in range(retries):
         r = curl(f"https://m.blog.naver.com/{blog_id}/{log}")
         h = r.stdout or ""
         if len(h) > 50000 and content_complete(h):
             print(f"[fetch] 완전본 확보 (시도 {i+1})")
             return h
+        if len(paragraph_texts(h)) > len(paragraph_texts(best)):
+            best = h
         print(f"[fetch] 시도 {i+1}: {'골격(텍스트 빈 문단)' if len(h) > 50000 else '실패'} — 재시도")
         time.sleep(2)
+    # content_complete는 '빈 강조문단이 많다'로 골격을 판정하는데, 19px·볼드로 띄운 빈 줄을
+    # 여백으로 많이 쓴 글은 그 조건에 그냥 걸린다(2026-07-30 스파이더맨BND: 강조문단 64개 중
+    # 41개가 여백, 5회 fetch 모두 동일). 데스크톱 PostView는 m.blog와 다른 렌더러이므로 두 쪽의
+    # 내용 문단이 일치하면 비결정적 골격이 아니라 원래 그런 글이다.
+    if best:
+        # 아이폰 UA로 PostView를 부르면 m.blog로 되돌리는 JS 리다이렉트(213바이트)만 오므로
+        # 교차검증 요청만 데스크톱 UA로 보낸다.
+        pv = curl(f"https://blog.naver.com/PostView.naver?blogId={blog_id}&logNo={log}"
+                  "&redirect=Dlog&widgetTypeCall=true&directAccess=false",
+                  ua=("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")).stdout or ""
+        a, b = paragraph_texts(best), paragraph_texts(pv)
+        if b and set(b) <= set(a):
+            print(f"[fetch] 골격 판정이었으나 PostView 교차검증 일치(내용 문단 {len(b)}) — 완전본으로 진행")
+            return best
     sys.exit("완전본 fetch 실패. 브라우저에서 글을 끝까지 스크롤해 저장한 HTML을 --html 로 주세요.")
 
 
@@ -223,7 +252,11 @@ def render_paragraph(p_attrs, p_inner):
             is_hl = True                          # 노란배경 소제목 — 나중에 하이라이트 패스로 입힘
         inner = render_inner(sinner)
         raw = re.sub(r"<[^>]+>", "", inner)
-        plain = raw.strip()
+        # plain은 반드시 엔티티를 푼 실제 텍스트로 뽑는다. inner는 esc를 거쳐 <가 &lt;,
+        # &가 &amp;로 들어있어서, 그대로 쓰면 원본 대조(_plain은 unescape)와 어긋나 본문에
+        # <나 &를 쓴 문단이 전부 거짓 누락으로 잡힌다. 하이라이트 패스의 selection 대조와
+        # 최종 에디터 검증도 실제 텍스트를 보므로 같은 이유로 unescape가 맞다.
+        plain = _plain(sinner).strip()
         plain_all += plain
         if not plain:
             if raw:                        # 공백만 있는 스팬도 구분 공백으로 보존
@@ -366,8 +399,14 @@ def verify_coords():
                                 'off:window.outerHeight-window.innerHeight,'
                                 'w:window.innerWidth,h:window.innerHeight})'))
     sx, sy, off = base["sx"], base["sy"], base["off"]
-    worst = 0
-    for fx, fy in ((0.35, 0.35), (0.35, 0.75)):
+    worst, hits = 0, 0
+    # 지점마다 __xy를 비운다. 한 번만 비우면, 어떤 지점에서 mousemove가 top document에
+    # 도달하지 않았을 때 앞 지점의 좌표가 그대로 남아 그 차이가 환산 오차로 잡힌다
+    # (2026-07-30: 창을 옮긴 뒤 0.75 지점이 페이지 안 iframe에 떨어져 331포인트 오차로
+    # 오진, 확대율은 1.000이고 실제 환산은 정확했다). 이벤트가 안 온 지점은 다른 지점으로
+    # 대체하고, 서로 다른 두 지점이 맞아야 통과시킨다.
+    for fx, fy in ((0.35, 0.35), (0.35, 0.75), (0.5, 0.55), (0.65, 0.3), (0.5, 0.85)):
+        chrome_js('(function(){window.__xy=null;return "ok";})()')
         X = round(sx + base["w"] * fx)
         Y = round(sy + off + base["h"] * fy)
         ev = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, (X, Y), Quartz.kCGMouseButtonLeft)
@@ -375,16 +414,24 @@ def verify_coords():
         time.sleep(0.45)
         r = chrome_js("JSON.stringify(window.__xy)")
         if r in ("null", ""):
-            sys.exit("[좌표] mousemove가 창에 도달하지 않음 — Chrome 창이 화면 밖이거나 가려져 있음")
+            print(f"    [좌표] 보낸({X},{Y}) → 이벤트 없음(iframe·오버레이 구간) — 다른 지점으로")
+            continue
         cx, cy = json.loads(r)
         dx, dy = X - (sx + cx), Y - (sy + off + cy)
         worst = max(worst, abs(dx), abs(dy))
+        hits += 1
         print(f"    [좌표] 보낸({X},{Y}) → client({cx},{cy}) 오차({dx:+},{dy:+})")
+        if hits >= 2:
+            break
+    if hits == 0:
+        sys.exit("[좌표] mousemove가 창에 도달하지 않음 — Chrome 창이 화면 밖이거나 가려져 있음")
     if worst > 3:
         sys.exit(f"[좌표] 화면좌표 환산 오차 {worst}포인트 — 붙여넣기 중단.\n"
                  f"       Chrome 확대율을 100%로 두세요(Cmd+0). 확대 상태면 클릭이 여백에 떨어져\n"
                  f"       입력이 제목칸으로 라우팅되고 하이라이트가 엉뚱한 문단에 칠해집니다.")
-    print(f"[좌표] 환산 검증 OK (최대 오차 {worst}포인트)")
+    if hits < 2:
+        sys.exit("[좌표] 이벤트가 도달한 지점이 1곳뿐 — 창이 가려졌는지 확인 후 다시 실행하세요.")
+    print(f"[좌표] 환산 검증 OK (지점 {hits}, 최대 오차 {worst}포인트)")
 
 
 def body_coords():
@@ -619,12 +666,16 @@ def set_title(title):
         click_at(c["x"], c["y"], clicks=3)       # 트리플클릭(전체선택) 후 붙여넣기 = 교체라 중복 없음
         time.sleep(0.8)
         cmd_v()
-        time.sleep(1.4)
-        got = chrome_js('(function(){return document.querySelector(".se-documentTitle").innerText.trim();})()')
-        if title[:10] in got:
-            print(f"[title] 입력됨: {got[:50]}")
-            return
-        time.sleep(1.0)
+        # 붙여넣기 직후 innerText 읽기는 한 번에 빈 문자열이 오는 일이 있어(2026-07-30 오펜하이머:
+        # 실제로는 제목이 들어갔는데 실패로 찍힘) 공백 제거 후 여러 번 읽어 확인한다.
+        want = re.sub(r"\s+", "", title)[:12]
+        for _ in range(3):
+            time.sleep(1.2)
+            got = chrome_js('(function(){var t=document.querySelector(".se-documentTitle");'
+                            'return t?t.innerText.trim():"";})()')
+            if want and want in re.sub(r"\s+", "", got):
+                print(f"[title] 입력됨: {got[:50]}")
+                return
     print(f"[title] 실패 — 수동 입력 필요: {title}")
 
 
