@@ -196,6 +196,21 @@ python3 tistory-to-naver/scripts/migrate_category.py '<CATEGORY_URL>' [옵션]
   - `migrate.py` (원샷), `migrate_from_url.py` (fetch·변환·청크), `migrate_category.py` (카테고리 일괄),
     `run_migration.py` (레거시 단계별), `dump_categories.py` (카테고리 ID 덤프),
     `upload_draft.py` (로컬 초안 업로드)
+
+### 글쓰기 탭 규칙 (2026-08-07 실측, 위반 시 매크로가 죽는다)
+
+**항상 새 탭을 연다. 기존 탭을 닫지도, 비워서 재사용하지도 않는다.**
+
+- **닫지 마라.** 작성 중인 글이 있는 postwrite 탭을 닫으면 beforeunload 네이티브 alert가 뜬다.
+  네이티브 alert는 CGEvent 입력과 osascript JS를 전부 삼켜서, 붙여넣기가 허공으로 가고
+  이후 모든 단계가 조용히 실패한다(붙였는데 문단 수가 그대로면 이 상황이다).
+- **비우지 마라.** Cmd+A + Backspace로 지우고 재사용하면 SE가 캐럿에 남은 인라인 서식을
+  유지해서, 다음 붙여넣기 때 소제목의 노란 배경이 본문 전체에 번진다
+  (notion-to-naver/SKILL.md의 취소선 사고와 같은 원인).
+- 임시저장 복원 다이얼로그는 **뜬 뒤에야 닫을 수 있다.** 새 탭 로딩 후 6초쯤 기다렸다가
+  전체 `button` 중 텍스트가 `취소`이고 `offsetParent`가 있는 것을 클릭한다.
+  `.se-canvas`가 준비되자마자 `.se-popup button`만 훑으면 아직 안 뜬 다이얼로그를 놓쳐
+  임시저장이 복원된 채로 붙여넣게 된다. 복원됐으면 지우지 말고 중단한다.
 - `_lib/` (리포 공용 에디터 매크로)
   - `inject_code_blocks.py` (Pass 2), `publish_with_category.py` (카테고리 지정 + 발행),
     `naver_inspect.py` (에디터 상태 조회, 디버깅용)

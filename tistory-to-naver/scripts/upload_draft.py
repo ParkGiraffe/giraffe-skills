@@ -51,26 +51,35 @@ def main():
     n_img = sum(1 for c in chunks if c["type"] == "image")
     print(f"[parse] {len(chunks)} chunks ({n_img} images) | title: {title}", flush=True)
 
-    # 단일 postwrite 탭 재사용 (좌표 읽는 탭 == 맨 앞 탭 보장 → 허공 붙여넣기 방지).
-    # 새 탭을 또 열면 chrome_js는 '첫' postwrite 탭을 보고 CGEvent는 '맨 앞' 탭을
-    # 때리므로 둘이 어긋난다(직전 사고 원인). 기존 탭 하나를 재사용하고 비운다.
-    print("[tab] ensuring single postwrite tab (reuse + clear)...", flush=True)
-    M.ensure_postwrite_tab(BLOG_ID)
-    M.chrome_js(M.JS_DISMISS_DIALOG)
-    time.sleep(0.6)
+    # 항상 '새 탭을 연다'. 2026-08-07 실측으로 확인된 두 가지 금지 사항:
+    #   1) 기존 탭을 닫지 말 것 — 작성 중인 글이 있으면 beforeunload alert가 뜨고,
+    #      네이티브 alert는 CGEvent 입력과 osascript JS를 전부 삼켜 매크로가 죽는다.
+    #   2) Cmd+A + Backspace로 비워서 재사용하지 말 것 — SE가 캐럿에 남은 인라인
+    #      서식(노란 배경·취소선)을 유지해 다음 붙여넣기 본문 전체에 번진다.
+    # 임시저장 복원 다이얼로그는 '떠야 닫을 수 있으므로' 로딩 후 넉넉히 기다렸다가
+    # 취소를 누른다. .se-popup 안만 보면 아직 안 뜬 다이얼로그를 놓친다.
+    print("[tab] opening a fresh postwrite tab (never close, never wipe)...", flush=True)
+    M.osa('tell application "Google Chrome"',
+          "activate",
+          "make new tab at end of tabs of window 1 with properties "
+          f'{{URL:"https://blog.naver.com/{BLOG_ID}/postwrite"}}',
+          "set active tab index of window 1 to (count of tabs of window 1)",
+          "end tell")
+    time.sleep(6)
+    M.chrome_js('(function(){var b=Array.from(document.querySelectorAll("button"))'
+                '.find(function(x){return x.textContent.trim()==="취소"&&x.offsetParent;});'
+                'if(b){b.click();return "dismissed";}return "no-dialog";})()')
+    time.sleep(1.5)
     if not M.wait_for_window_focus():
         print("[ERROR] Chrome never got OS focus", flush=True)
         sys.exit(1)
 
     n = int(M.chrome_js(M.JS_COMPONENT_COUNT))
     if n > 2:
-        print(f"[clear] editor has {n} components -> wiping", flush=True)
-        c = json.loads(M.chrome_js(M.JS_BODY_COORDS))
-        M.click(c["x"], c["y"]); time.sleep(0.4)
-        M.key(M.KEY_A, cmd=True); time.sleep(0.5)
-        M.key(M.KEY_BACKSPACE); time.sleep(0.9)
-        n = int(M.chrome_js(M.JS_COMPONENT_COUNT))
-        print(f"[clear] now {n} components", flush=True)
+        print(f"[ABORT] 새 탭인데 컴포넌트가 {n}개 — 임시저장이 복원됐다. "
+              "지우고 쓰지 않는다(서식 번짐). 다이얼로그를 직접 취소한 뒤 재실행할 것.",
+              flush=True)
+        sys.exit(3)
 
     # ---- title ----
     print("[title] pasting...", flush=True)
