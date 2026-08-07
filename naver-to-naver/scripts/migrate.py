@@ -23,6 +23,7 @@ class="se-text-paragraph-align-center"만 제거한다. 그래서 align 속성�
   - m.blog SSR이 긴 글 텍스트를 비운 골격을 줄 수 있음 → 자동 재시도, 안 되면 --html
 """
 import re, sys, json, time, argparse, base64, hashlib, pathlib, subprocess
+import urllib.parse
 import html as H
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -36,6 +37,34 @@ REFERER = "https://blog.naver.com/"
 CACHE = pathlib.Path.home() / ".cache" / "naver-to-naver"
 ORIG = CACHE / "orig"
 USE_CENSORED = False   # --censored 명시 시에만 가려진 캐시 사용(검열은 사용자가 직접 요청할 때만)
+
+# --local-images: 소스 글 이미지를 '파일명 1:1 매칭'으로 로컬 폴더 파일과 스왑한다.
+# 원리 — 네이버는 업로드 원본 파일명을 URL basename에 그대로 보존한다. 그래서 원본 폴더
+#   (output/)를 주면 미검열 발행, 검열본 폴더(output/검열본/)를 주면 검열 발행이 된다.
+#   매칭 안 되는 이미지(밈·스티커 등 폴더에 없는 것)는 네이버에서 그대로 다운로드(폴백).
+LOCAL_INDEX = {}                       # 정규화 파일명 -> 로컬 파일 경로
+LOCAL_STATS = {"hit": 0, "miss": []}   # 스왑 성공 수 / 폴백(다운로드)된 basename 목록
+LOCAL_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".tiff"}
+
+
+def fnkey(name):
+    """파일명 정규화 키 — 네이버 URL(언더스코어)과 로컬 파일(공백) 차이를 흡수.
+    URL-decode 후 basename만, 연속 [_공백]을 단일 공백으로, 소문자화."""
+    name = urllib.parse.unquote(name).rsplit("/", 1)[-1]
+    return re.sub(r"[_\s]+", " ", name).strip().lower()
+
+
+def build_local_index(dirpath):
+    d = pathlib.Path(dirpath).expanduser()
+    if not d.is_dir():
+        sys.exit(f"--local-images 폴더 없음: {d}")
+    idx = {}
+    for p in sorted(d.iterdir()):
+        if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in LOCAL_EXTS:
+            idx[fnkey(p.name)] = p.resolve()
+    if not idx:
+        sys.exit(f"--local-images 폴더에 이미지 없음: {d}")
+    return idx
 
 MEDIA_RE = re.compile(r'https?://([a-z0-9-]+\.pstatic\.net)/([^"?\s\\]+\.(?:jpe?g|png|gif))', re.I)
 P_RE = re.compile(r'<p([^>]*class="se-text-paragraph[^"]*"[^>]*)>(.*?)</p>', re.S)
@@ -150,7 +179,14 @@ def head_len(url):
 
 
 def download_original(dom, path):
-    """원본 화질로 다운로드. 반환: 로컬 파일 경로 또는 None."""
+    """원본 화질로 다운로드. 반환: 로컬 파일 경로 또는 None.
+    --local-images가 있으면 소스 이미지 파일명과 1:1 매칭되는 로컬 파일을 우선 사용(스왑)."""
+    if LOCAL_INDEX:
+        local = LOCAL_INDEX.get(fnkey(path))
+        if local and local.exists():
+            LOCAL_STATS["hit"] += 1
+            return local
+        LOCAL_STATS["miss"].append(urllib.parse.unquote(path).rsplit("/", 1)[-1])
     CACHE.mkdir(parents=True, exist_ok=True)
     ext = pathlib.Path(path).suffix.lower() or ".jpg"
     dest = CACHE / (hashlib.sha1(path.encode()).hexdigest()[:20] + ext)
@@ -752,6 +788,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--censored", action="store_true",
                     help="가려진(검열) 캐시 이미지 사용 — 사용자가 명시적으로 요청할 때만")
+    ap.add_argument("--local-images", default=None,
+                    help="소스 글 이미지를 파일명 1:1 매칭으로 이 폴더의 파일과 스왑. "
+                         "원본 폴더=미검열 발행, 검열본 폴더=검열 발행. 매칭 안 되면 네이버에서 폴백 다운로드.")
     ap.add_argument("--title", default=None, help="제목 덮어쓰기(예: 화수 변경 재발행)")
     args = ap.parse_args()
 
@@ -763,10 +802,13 @@ def main():
     blog_id = args.blog_id or (bm.group(1) if bm else "op5321")
 
     src = fetch_source(blog_id, log, args.html)
-    global USE_CENSORED
+    global USE_CENSORED, LOCAL_INDEX
     USE_CENSORED = args.censored
     if args.censored:
         print("[주의] --censored: 가려진 캐시 이미지 사용")
+    if args.local_images:
+        LOCAL_INDEX = build_local_index(args.local_images)
+        print(f"[local-images] {len(LOCAL_INDEX)}개 로컬 파일 인덱싱 — 파일명 매칭 스왑 모드")
     tm = re.search(r'<meta property="og:title" content="([^"]*)"', src)
     title = args.title or (H.unescape(tm.group(1)) if tm else "")
 
@@ -777,6 +819,10 @@ def main():
     print(f"[build] 원본 문단 {len(src_paras)} / 청크 누락 {len(missing)}")
     for t in missing[:10]:
         print("   MISSING:", t[:60])
+    if LOCAL_INDEX:
+        print(f"[local-images] 스왑 {LOCAL_STATS['hit']} / 폴백(네이버 다운로드) {len(LOCAL_STATS['miss'])}")
+        for nm in LOCAL_STATS["miss"]:
+            print("   폴백:", nm)     # 밈·스티커 등 로컬에 없는 것. 검열본이 섞여 나오지 않게 반드시 확인.
     if stats["fail"]:
         print("[build] 이미지 실패:", stats["fail"])
     if missing or stats["fail"]:
