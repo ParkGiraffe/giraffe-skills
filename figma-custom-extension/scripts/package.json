@@ -1,0 +1,9 @@
+{
+  "name": "figma-icon-extraction-scripts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "sharp": "^0.33.5",
+    "pixelmatch": "^6.0.0"
+  }
+}
