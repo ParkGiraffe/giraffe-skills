@@ -65,23 +65,36 @@ md_to_smarteditor.py는 이모지가 있으면 exit 3 — 대본을 수정하고
 - meta.json: 제목 후보 5개(기린파크 제목 컨벤션, blog-title 스킬 연계 가능) + 해시태그 + `images.source_folder`
 - 카테고리는 실제 목록을 보고 결정: postwrite 발행 레이어의 카테고리 셀렉트박스를 열어 `data-testid^=categoryItem` 덤프로 확인 (tistory-to-naver/SKILL.md의 셀렉터 참조), 후보를 사용자에게 제시해 확정받는다.
 
-### 5. 업로드 — osascript 오케스트레이션 (사용자 입회)
+### 5. 업로드 — 스크립트 한 번 (사용자 입회)
 
-blog/SKILL.md 7-1 자동 흐름 그대로:
+```bash
+python3 blog/scripts/upload_to_editor.py .claude/blog-corpus/drafts/<드래프트> [--clear]
+```
 
-1. postwrite 탭 확보 (없으면 열기) + 임시저장 다이얼로그 JS로 취소
-2. CGEvent로 본문 클릭해 포커스 확보 → 실행:
-   ```bash
-   python3 blog/scripts/paste_to_naver.py .claude/blog-corpus/drafts/<드래프트 폴더>
-   ```
-   (이미지는 meta.json `images.source_folder`에서 자동 로드, 파일 URL 클립보드 방식이라 네이버가 자동 업로드)
-3. 코드블록 inject:
-   ```bash
-   python3 <giraffe-skills 리포 루트>/_lib/inject_code_blocks.py
-   ```
-   (기본 사이드카 경로 `/tmp/naver_code_blocks.json` 사용. 언어 표기는 기본 javascript라 다르면 에디터에서 수동 변경)
-4. **스타일 패스** (빼먹기 쉽다. 2026-07-07 첫 실행 때 누락): `tistory-to-naver/scripts/migrate.py`의 `style_pass()` 호출로 모든 구분선을 line3(가운데 꺾임)+가운데 정렬, 모든 사진을 가운데 정렬로. 합성 JS만 쓰므로 전면 앱 무관. 실행 후 셀렉터로 적용 여부 검증.
-5. 제목 자동 입력 (pbcopy → 제목칸 클릭 → Cmd+V)
+탭 확보, 전면 앱·포커스 검증, 제목 입력, 본문 붙여넣기(`paste_to_naver.py` 호출),
+`여행 날짜` 줄 볼드, 스타일 패스(구분선 line3+가운데, 사진 가운데), 결과 검증까지
+한 프로세스로 돈다. 각 단계에서 실패하면 즉시 멈추므로 무인으로 계속 쏘는 사고가 안 난다.
+
+- `--clear`는 **에디터에 이미 내용이 있을 때만** 붙인다. 없으면 중단하는데,
+  사용자가 에디터에서 직접 고쳐 둔 원고를 지키기 위한 안전장치다.
+  실제로 사용자가 도입부를 새로 써 넣은 뒤 재업로드하면 그 작업이 사라진다.
+  다시 올리기 전에 발행됐는지, 손댄 곳이 있는지 먼저 확인할 것.
+- 코드블록이 있으면 이어서 `python3 _lib/inject_code_blocks.py`.
+
+**동영상**은 클립보드로 안 붙는다. 네이버 자체 업로더를 거쳐야 한다:
+
+```bash
+python3 _lib/upload_video.py <영상파일> "제목"
+```
+
+대본에는 `[영상 자리 : 파일명.mp4]` 한 줄로 자리만 잡아 두고, 본문을 다 올린 뒤 그 문단을
+클릭해 캐럿을 옮기고 부르면 그 자리에 들어간다. 동영상은 현재 캐럿 위치에 삽입되기 때문이다.
+
+**사진 워터마크**가 필요하면 업로드 전에 굽는다:
+
+```bash
+python3 _lib/watermark.py <입력폴더> <출력폴더> --scale 0.85
+```
 
 ### 6. 발행 — 개발 글은 비공개
 
@@ -106,6 +119,14 @@ curl -s -A "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)" "https://m.b
 - **탭 활성화·창 raise·좌표 측정·클릭은 한 프로세스에서 원자적으로.** 셸 호출을 쪼개면 사이에 창 순서가 바뀌어 좌표가 다른 창에 떨어진다.
 - **마크다운 인라인 문법 지원 범위**: 전체 라인 볼드(`**...**` 단독 라인)와 **인라인 코드(백틱)** 지원. 인라인 코드는 노션풍 회색 배경+붉은 글자 span으로 변환되며 네이버가 스타일을 보존한다(2026-07-07 실측 13/13). **전사 시 백틱을 지우지 말고 그대로 유지할 것.** 문장 중간 부분 볼드·마크다운 링크(`[텍스트](URL)`)는 여전히 미지원 — 부분 볼드는 평문화, 링크는 순수 URL 텍스트로.
 - **클립보드 HTML은 반드시 `paste_to_naver.copy_html_to_clipboard()`로 쓸 것 — NSPasteboard에 손으로 쓰지 말 것 (2026-07-07 취소선 사고).** 손으로 만든 public.html 페이로드를 붙였더니 SE가 해시태그 줄을 `<strike>`로 감쌌고, 같은 자리에 재붙여넣기해도 SE가 캐럿의 인라인 서식(취소선)을 유지해 반복 재발했다. 서식 이상이 보이면 반복 paste로 싸우지 말고 즉시 사용자에게 넘길 것 (툴바에서 서식 해제가 확실).
+- **동영상 파일 선택 창은 접근성으로 내부가 안 보인다.** Chrome 창에 붙은 시트인데
+  버튼·텍스트필드가 0개로 잡힌다. 그래도 키는 전달되므로 `tell process "Google Chrome"`을
+  명시해 슬래시(/)로 경로 창을 연 뒤 `set value of text field 1`로 경로를 직접 넣는다.
+  프로세스를 명시하지 않고 keystroke를 쏘면 전면 앱(터미널)이 받아 버린다.
+  파일명에 한글이 있으면 타이핑은 IME 때문에 깨지므로 값 설정이 정답이다.
+- **파일 선택 창을 여는 버튼은 합성 클릭이 막힌다.** 브라우저가 사용자 제스처를 요구하므로
+  `.nvu_btn_append.nvu_local`은 CGEvent 실제 클릭으로 눌러야 한다. 업로더 레이어를 여는
+  툴바 버튼(`button[data-name=video]`)까지는 JS 클릭으로 열린다.
 - **claude-in-chrome은 blog.naver.com을 하드블록** — 네이버 자동화는 osascript 경로만 ([[naver-automation-osascript-route]]).
 - Notion S3 서명 URL 만료(5분) — fetch와 다운로드는 반드시 같은 턴에.
 - 외부 클립보드로는 어떤 SmartEditor 마크업을 붙여도 본문 컴포넌트로 normalize됨 — 소제목은 시각 스타일(노란 배경 24px 볼드)로 충분, 코드블록만 inject_code_blocks.py로 native 주입 (원리는 tistory-to-naver/SKILL.md 참조).
