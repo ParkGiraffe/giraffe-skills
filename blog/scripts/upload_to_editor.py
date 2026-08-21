@@ -9,17 +9,22 @@ blog/scripts/paste_to_naver.py는 "본문 붙여넣기"만 한다. 그 앞뒤로
 무인 실행 금지 규칙에 따라 각 단계에서 검증하고 실패하면 즉시 중단한다.
 사진이 하나도 안 들어갔거나 제목이 안 박히면 계속 쏘지 않는다.
 
-사용:
-  upload_to_editor.py <draft_dir> [--clear]
+새 글은 **항상 새 창에 새 글쓰기 창을 열어서** 쓴다. 기존 글쓰기 탭을 재사용하거나
+비우지 않는다. 사용자가 에디터에서 직접 쓰던 원고가 날아가는 사고가 있었다(2026-08-21).
+기존 탭은 손대지 않으므로 사용자가 하던 작업은 그대로 남는다.
 
-  --clear   에디터에 이미 내용이 있으면 비우고 진행. 없으면 중단한다
-            (사용자가 손으로 고쳐 둔 원고를 날리지 않기 위한 안전장치).
+사용:
+  upload_to_editor.py <draft_dir>
 
 draft_dir 요구사항:
   script.md   본문 (blog 스킬 형식)
   meta.json   title_candidates[0]을 제목으로 쓰고, images.source_folder에서 사진을 읽는다
+
+대본에 `[영상 자리 : 파일명.mp4]` 줄이 있고 meta.json에 videos_folder가 있으면
+본문을 다 올린 뒤 그 자리를 실제 동영상으로 바꾼다. 동영상은 캐럿 위치에 삽입되므로
+자리 문단을 통째로 선택해 지워 빈 문단에 캐럿을 남긴 뒤 업로더를 부른다.
 """
-import json, subprocess, sys, time
+import json, re, subprocess, sys, time
 
 REPO = "/Users/bag-yoseb/Desktop/Project/personal/giraffe-skills"
 sys.path.insert(0, f"{REPO}/tistory-to-naver/scripts")
@@ -52,6 +57,50 @@ JS_DATE_BOLD = """
 })()"""
 
 
+JS_VIDEO_SLOT = """
+(() => {
+  const p = Array.from(document.querySelectorAll('.se-text p'))
+    .find(e => e.innerText.includes('[영상 자리'));
+  if (!p) return 'none';
+  p.scrollIntoView({block:'center'});
+  const r = p.getBoundingClientRect();
+  return JSON.stringify({
+    text: p.innerText.trim(),
+    x: Math.round(window.screenX + r.left + Math.min(r.width/2, 80)),
+    y: Math.round(window.screenY + (window.outerHeight - window.innerHeight) + r.top + r.height/2)
+  });
+})()"""
+
+JS_VIDEO_COUNT = ("String(document.querySelectorAll('.se-component.se-video, "
+                  ".se-component.se-videoDetail').length)")
+
+
+def open_fresh_window():
+    """새 Chrome 창을 만들어 글쓰기 페이지를 연다.
+
+    기존 글쓰기 탭을 재사용하지 않는 이유는 단순하다. 그 탭에는 사용자가 직접 쓰던
+    원고가 들어 있을 수 있고, 한 번 비우면 되돌릴 방법이 없다.
+    새 창을 만들면 그 창이 window 1이 되므로, URL로 탭을 찾는 migrate.chrome_js가
+    항상 이 창의 글쓰기 탭을 먼저 집는다. 사용자의 기존 탭은 건드리지 않는다.
+    """
+    url = M.POSTWRITE_URL.format(blog_id=M.BLOG_ID)
+    M.osa('tell application "Google Chrome" to make new window')
+    time.sleep(1.0)
+    M.osa(f'tell application "Google Chrome" to set URL of active tab of window 1 to "{url}"')
+    for _ in range(25):
+        time.sleep(1.0)
+        try:
+            if M.chrome_js("document.querySelector('.se-canvas') ? 'ready' : 'loading'") == "ready":
+                break
+        except Exception:
+            pass
+    else:
+        print("[ABORT] 글쓰기 창이 안 뜸"); sys.exit(2)
+    M.osa('tell application "Google Chrome" to set index of window 1 to 1')
+    M.osa('tell application "Google Chrome" to activate')
+    time.sleep(0.8)
+
+
 def frontmost():
     return M.osa('tell application "System Events" to get name of '
                  'first application process whose frontmost is true')
@@ -75,14 +124,56 @@ def counts():
     return json.loads(M.chrome_js(M.JS_PASTE_COUNTS, timeout=8))
 
 
+def place_videos(draft, meta):
+    """대본의 `[영상 자리 : ...]`를 실제 동영상으로 바꾼다.
+
+    자리 문단을 triple_click으로 통째로 선택해 지우면 빈 문단에 캐럿이 남는다.
+    그 상태에서 업로더를 부르면 동영상이 정확히 그 자리에 들어간다.
+    자리가 없어질 때까지 한 개씩 처리한다.
+    """
+    folder = meta.get("videos_folder")
+    if not folder:
+        print("      videos_folder 없음 -> 영상 자리는 그대로 둔다")
+        return
+    titles = {v.get("file"): v.get("title") for v in meta.get("videos", [])}
+
+    done = 0
+    for _ in range(20):
+        r = M.chrome_js(JS_VIDEO_SLOT)
+        if r == "none":
+            break
+        slot = json.loads(r)
+        m = re.search(r"\[영상 자리\s*:\s*([^\]]+)\]", slot["text"])
+        if not m:
+            print(f"      [WARN] 자리 형식을 못 읽음: {slot['text'][:40]}"); break
+        fname = m.group(1).strip()
+        path = f"{folder.rstrip('/')}/{fname}"
+        # 제목은 meta에 있으면 그걸 쓰고, 없으면 파일명에서 슬롯 접두어를 뗀다
+        title = titles.get(fname) or fname.split("_", 2)[-1].rsplit(".", 1)[0]
+
+        if not guard():
+            print(f"[ERROR] 전면 앱이 Chrome이 아님({frontmost()}). 중단."); sys.exit(1)
+        M.triple_click(slot["x"], slot["y"]); time.sleep(0.5)
+        M.key(M.KEY_BACKSPACE); time.sleep(1.0)
+
+        before = int(M.chrome_js(JS_VIDEO_COUNT))
+        rc = subprocess.run([sys.executable, f"{REPO}/_lib/upload_video.py", path, title]).returncode
+        after = int(M.chrome_js(JS_VIDEO_COUNT))
+        if rc != 0 or after <= before:
+            print(f"[ABORT] 영상 삽입 실패: {fname}"); sys.exit(6)
+        done += 1
+        print(f"      {fname} -> 삽입 완료 (동영상 {after}개)")
+    print(f"      영상 {done}개 배치")
+
+
 def main():
     draft = sys.argv[1].rstrip("/")
     meta = json.loads(open(f"{draft}/meta.json", encoding="utf-8").read())
     title = meta["title_candidates"][0]
 
-    print("[1/6] 글쓰기 탭 준비")
-    M.ensure_postwrite_tab(M.BLOG_ID)
-    M.chrome_js(M.JS_DISMISS_DIALOG)
+    print("[1/7] 새 글쓰기 창 열기")
+    open_fresh_window()
+    M.chrome_js(M.JS_DISMISS_DIALOG)   # "작성 중인 글" 복구 물음은 취소
     time.sleep(0.6)
     if not guard():
         print(f"[ERROR] 전면 앱이 Chrome이 아님({frontmost()}). 중단."); sys.exit(1)
@@ -99,17 +190,11 @@ def main():
     n = int(M.chrome_js(M.JS_COMPONENT_COUNT))
     print(f"      컴포넌트 {n}개")
     if n > 2:
-        if "--clear" not in sys.argv:
-            print("[ABORT] 에디터가 비어 있지 않음. --clear 없이는 진행 안 함."); sys.exit(3)
-        print("      --clear: 본문 비우는 중")
-        c = json.loads(M.chrome_js(M.JS_BODY_COORDS))
-        M.click(c["x"], c["y"]); time.sleep(0.5)
-        M.key(M.KEY_A, cmd=True); time.sleep(0.6)
-        M.key(M.KEY_BACKSPACE); time.sleep(1.2)
-        if int(M.chrome_js(M.JS_COMPONENT_COUNT)) > 2:
-            print("[ABORT] 본문이 안 비워짐."); sys.exit(3)
+        # 새 창인데 내용이 있다는 건 복구 물음을 못 닫았다는 뜻이다.
+        # 남의 원고일 수 있으니 절대 지우지 않고 멈춘다.
+        print("[ABORT] 새 창인데 본문이 비어 있지 않음. 사람이 확인할 것."); sys.exit(3)
 
-    print("[2/6] 제목 입력")
+    print("[2/7] 제목 입력")
     M.copy_text(title)
     ok = False
     for _ in range(3):
@@ -128,7 +213,7 @@ def main():
         print("[ABORT] 제목 입력 실패. 중단."); sys.exit(4)
     print(f"      {title}")
 
-    print(f"[3/6] 본문 붙여넣기 (사진 {meta['images']['count']}장)")
+    print(f"[3/7] 본문 붙여넣기 (사진 {meta['images']['count']}장)")
     if not guard():
         print(f"[ERROR] 전면 앱이 Chrome이 아님({frontmost()}). 중단."); sys.exit(1)
     c = json.loads(M.chrome_js(M.JS_BODY_COORDS))
@@ -141,7 +226,7 @@ def main():
     if after["img"] - before["img"] == 0:
         print("[ABORT] 이미지가 하나도 안 들어감."); sys.exit(5)
 
-    print("[4/6] 여행 날짜 줄 볼드")
+    print("[4/7] 여행 날짜 줄 볼드")
     r = M.chrome_js(JS_DATE_LINE)
     if r == "none":
         print("      날짜 줄 없음, 건너뜀")
@@ -154,11 +239,14 @@ def main():
         print(f"      볼드 적용: {M.chrome_js(JS_DATE_BOLD)}")
         M.chrome_js(M.JS_DESELECT)
 
-    print("[5/6] 스타일 패스 (구분선 line3+가운데, 사진 가운데)")
+    print("[5/7] 영상 자리 채우기")
+    place_videos(draft, meta)
+
+    print("[6/7] 스타일 패스 (구분선 line3+가운데, 사진 가운데)")
     styled = M.style_pass()
     print(f"      구분선 {styled['hr']}개, 사진 {styled['img']}개")
 
-    print("[6/6] 최종 확인")
+    print("[7/7] 최종 확인")
     time.sleep(1.5)
     fin = counts()
     body = M.chrome_js("document.querySelector('.se-canvas').innerText")
