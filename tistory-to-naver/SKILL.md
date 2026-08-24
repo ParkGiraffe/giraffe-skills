@@ -25,15 +25,67 @@ Tistory 글을 그냥 복사해서 네이버에 붙이면:
 - Chrome 메뉴 바 → 보기 → 개발자 → "Apple Events의 자바스크립트 허용" 체크
   (코드블록 Pass 2의 osascript in-page JS 주입 권한. 코드블록 없는 글이면 불필요)
 
+## 제목 재작성 (기본 동작, 2026-08-24 확정)
+
+**티스토리 원제를 그대로 옮기지 않는다.** 네이버 제목 컨벤션은 `[카테고리] 본문 : 부제`인데
+티스토리 원제는 대괄호 안에 형태 토큰이 붙고(`[호그와트 레거시 - 팁]`) 구분자가 `/`라,
+그대로 옮기면 같은 시리즈의 네이버 글들과 형식이 어긋난다. migrate 실행 **전에** 제목을
+확정해 `--title`로 넘긴다.
+
+1. 네이버 post-list API로 **같은 시리즈의 실제 네이버 제목**을 열거해 대괄호 표기·구분자·부제
+   구성을 확인한다. 제목의 정본(SSOT)은 언제나 네이버 원본이고 티스토리가 아니다.
+   ```bash
+   curl -s -A "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" \
+     -H "Referer: https://m.blog.naver.com/op5321" \
+     "https://m.blog.naver.com/api/blogs/op5321/post-list?categoryNo=0&itemCount=30&page=1" \
+     | python3 -c "import sys,json,html; d=json.load(sys.stdin); [print(p.get('logNo'), html.unescape(p.get('titleWithInspectMessage',''))) for p in d['result']['items']]"
+   ```
+   같은 시리즈의 앞 글이 이미 옮겨져 있으면 그 글이 정답 템플릿이다. 그 네이버 글을 curl로
+   받아 본문의 `arnopark.tistory.com/<번호>` 백링크를 보면, 어느 티스토리 글이 어떤 제목으로
+   재작성됐는지 1:1로 확인된다.
+2. 그 컨벤션에 맞춘 후보를 **2~3개 만들어 AskUserQuestion으로 고르게 한다.** 제목은 글에서
+   가장 눈에 띄는 산출물이라 사용자가 직접 고르는 편이 낫고, 후보를 나란히 보여주면 판단이
+   한 번에 끝난다. 후보끼리는 부제 축을 달리한다(위치 안내형 / 개체 나열형 / 핵심 키워드 강조형).
+   부제 문구는 `naver-blog-tags/scripts/related_keywords.py`로 확인한 실제 검색 수요에서 가져온다.
+3. 고른 제목을 `--title "..."`로 넘긴다.
+
+실측(2026-08-24, 티스토리 591): 원제 `[호그와트 레거시 - 팁] 놓친 어둠의 마법 다시 배우기`를
+직전 590의 네이버 제목(`[호그와트 레거시] 엄청난 양의 곱스톤 : 곱스톤 6개 위치 전부 찾기`)에
+맞춰 `[호그와트 레거시] 놓친 어둠의 마법 다시 배우기 : 세바스찬 위치와 언더크로프트 가는 법`으로
+재작성했다.
+
+시리즈 선례가 없어 컨벤션을 못 찾겠으면 `/blog-title` 스킬로 후보 5개를 뽑는다.
+
 ## 실행 절차 (단일 명령, 사용자 액션 0회)
 
-**디폴트는 `migrate.py` 원샷 파이프라인** (2026-06-12 도입, 908 기준 72초 완주).
+**디폴트는 `migrate_fresh_tab.py`** (2026-08-20 확정 — 883 마이그레이션 사고 이후).
 시작 전 "약 1~2분간 키보드·마우스를 건드리지 마세요"만 고지하고 실행:
 
 ```bash
 cd <giraffe-skills 리포 루트>
-python3 tistory-to-naver/scripts/migrate.py '<TISTORY_URL>' --tags "태그1 태그2 ..." [--clear]
+python3 tistory-to-naver/scripts/migrate_fresh_tab.py '<TISTORY_URL>' \
+  --title "[카테고리] 본문 : 부제" --tags "태그1 태그2 ..."
 ```
+
+`--title`과 `--tags`는 둘 다 실행 전에 확정해 둔다(위 "제목 재작성", 아래 "태그 새로 작성").
+
+**기존 postwrite 탭은 절대 건드리지 않는다 — 닫지도, 비우지도(`--clear` 금지),
+재사용하지도 않는다. 항상 새 탭을 열어 그 탭에서만 작업한다.** 사용자가 여러 차례
+반복 지시로 확정한 하드룰이다. 위반 시 벌어진 실측 사고: 탭 재사용 → 임시저장
+복원분에 붙여넣어 중복·서식 전이, `--clear` → 캐럿에 남은 서식이 새 본문에 전이,
+탭 닫기 시도 → beforeunload alert가 매크로 전체를 블로킹.
+
+`migrate.py`를 직접 부르면 '첫 번째' postwrite 탭을 조준하므로 기존 탭이 있으면
+사고가 난다. `migrate_fresh_tab.py`가 새 탭을 열고 '마지막' postwrite 탭 조준으로
+바꿔치기한 뒤 migrate.py의 main을 그대로 실행한다. 새 탭이 비어있지 않으면
+비우지 않고 ABORT한다.
+
+**워터마크 (2026-08-20 도입)**: 다운로드되는 모든 사진 우측 하단에
+`blog.naver.com/op5321`(배달의민족 도현체, 글자 높이 = 폭의 2.57%, 불투명도 150)을
+자동 삽입한다 (`scripts/watermark.py`, 스타일 상수는 사용자 확정값 — 임의 변경 금지).
+GIF는 프레임이 깨지므로 건너뛴다. 끄려면 `WATERMARK=0` 환경변수.
+이미지 캐시(`scripts/images/`)는 매 실행 전 자동으로 비운다 — 캐시 재사용 시
+이전 실행의 다른 워터마크 스타일이 섞여 들어가는 사고가 있었다.
 
 이 스킬은 `scripts/`(변환 엔진)와 리포 공용 `_lib/`(에디터 매크로)을 함께 쓰므로
 **명령은 리포 루트에서 실행**한다. 심링크로 설치된 `~/.claude/skills/tistory-to-naver`에서
@@ -80,7 +132,25 @@ python3 tistory-to-naver/scripts/migrate.py '<TISTORY_URL>' --tags "태그1 태�
    영화감상문 템플릿(2026-07-29 모아나 글 기준): 작품명 + 작품명×(후기/리뷰/감상문/줄거리/해석/결말)
    + 등장인물 합성 + 감독·제작사 + 광역(영화감상문/영화후기/영화추천/영화)
 4. 15~25개를 `--tags "a b c"` 공백 구분으로 넘긴다(`#` 없이, 쉼표도 허용)
-5. migrate 종료 후 같은 태그 줄을 `naver-blog-tags/scripts/clip.py`로 클립보드에 복사.
+5. migrate 종료 후 **묻지 말고 곧바로** 클립보드에 복사한다. 형식은 `/naver-blog-tags`와 같은
+   **2블록 고정**: 전체 세트 → 빈 줄 2개 → 핵심 10~12개. 사용자가 상황에 따라 위(전체)나
+   아래(핵심)를 골라 붙여넣으므로, 한 블록만 넣으면 "핵심만 다시 뽑아줘"를 매번 요청하게 만든다.
+   `clip.py`는 줄바꿈을 단일 공백으로 정규화하므로 2블록에는 쓸 수 없다. `pbcopy`에 직접 넣는다:
+
+   ```bash
+   python3 - <<'PY'
+   import subprocess
+   full = "#태그1 #태그2 ..."           # 전체 세트 15~29개
+   core = "#핵심1 #핵심2 ..."           # 핵심 10~12개
+   payload = full + "\n\n\n" + core    # 사이에 빈 줄 2개
+   subprocess.run(["pbcopy"], input=payload.encode("utf-8"), check=True)
+   assert subprocess.run(["pbpaste"], capture_output=True).stdout.decode() == payload
+   PY
+   ```
+
+   핵심 블록 선정 기준: 네이버 자동완성에 실제로 잡히는 조합 우선, 글의 각 섹션과 1:1 대응,
+   광역 태그(`#해리포터`, `#호그와트`처럼 경쟁이 과열된 단일어)는 제외. 복사 후 `pbpaste`로
+   검증하고 두 블록의 개수를 각각 보고한다.
    본문 하단 해시태그는 시각 표시일 뿐이라 사용자가 발행 레이어 태그란에 따로 붙여야 진짜 태그가 된다
 
 `--tags`를 생략하면 예전처럼 티스토리 원본 태그가 들어간다(2026-07-29 `migrate.py`에 추가한 플래그,

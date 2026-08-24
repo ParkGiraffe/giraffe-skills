@@ -288,6 +288,10 @@ def predownload_images(soup):
         urls.append(src)
     if not urls:
         return
+    # 캐시 재사용 금지: download_image는 파일이 있으면 워터마크를 건너뛰고 그대로
+    # 돌려주므로, 이전 실행(다른 워터마크 스타일/무워터마크)의 캐시가 섞여 들어간다
+    # (2026-08-20 실측 사고). 매 실행 전 비운다.
+    m.clear_temp_images()
     print(f"[1/6] downloading {len(urls)} image(s) in parallel...")
     with ThreadPoolExecutor(max_workers=6) as ex:
         list(ex.map(m.download_image, urls))

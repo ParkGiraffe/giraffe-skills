@@ -56,6 +56,13 @@ def download_image(url):
                 for chunk in response.iter_content(1024):
                     f.write(chunk)
             print(f"Saved: {filename}")
+            # 워터마크: blog.naver.com/op5321 우측 하단 (도현체, WATERMARK=0 으로 끔)
+            if os.environ.get("WATERMARK", "1") != "0":
+                try:
+                    from watermark import add_watermark
+                    add_watermark(filepath)
+                except Exception as e:
+                    print(f"[watermark] skip: {e}")
             return filepath
         else:
             print(f"Failed to download {url}: Status {response.status_code}")
