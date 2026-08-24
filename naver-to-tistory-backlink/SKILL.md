@@ -24,6 +24,20 @@ description: 네이버 블로그(op5321) 글을 티스토리(arnopark)에 SEO �
 - 리포 안 `_lib/parse_smarteditor.py` 존재 (`blog-learn`과 공유. 본문 파싱용)
 - 네이버 도메인은 claude-in-chrome MCP 안전정책으로 navigate가 차단됨 → 본문 fetch는 **curl로 우회**
 
+## 하드룰: osascript 금지 (2026-08-23 사용자 지시)
+
+**이 스킬에서 osascript(AppleScript)를 쓰지 않는다. 예외 없다.**
+브라우저 조작은 `claude-in-chrome` MCP만 쓴다.
+
+- `tell application "Google Chrome" ... execute javascript` 로 주입하지 않는다.
+- `activate`, `set active tab index`, System Events `key code` 전송 전부 금지.
+- 금지 이유: osascript 경로는 Chrome을 최전면으로 올리고 탭 활성을 바꿔
+  **사용자 커서·포커스를 빼앗는다.** 사용자가 작업 중일 때 입력이 엉뚱한 창으로
+  들어간다. 배치가 길수록 피해가 커진다.
+- 배치에서 base64 손전사 오염이 걱정되더라도 osascript로 갈아타지 말 것.
+  그건 [[feedback_backlink_clipboard_inject]]의 클립보드 무전사 주입이나
+  청크 + SHA-256 대조로 푸는 문제다. 주입 경로를 바꿔서 풀 문제가 아니다.
+
 ## 실행 절차
 
 ### 1. 백링크 안 된 logNo 선정 (인자 없을 때만)
