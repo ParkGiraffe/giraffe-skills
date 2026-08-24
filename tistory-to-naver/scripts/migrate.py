@@ -22,6 +22,8 @@ Usage:
   --clear     wipe the editor body first if it is not empty (otherwise the
               script aborts to avoid eating an unsaved draft)
   --no-style  skip step 6
+  --core-tags 본문 footer에 전체 태그 줄 아래 빈 줄 하나를 두고 붙일 핵심
+              태그 10~12개. --tags와 함께 항상 넘긴다.
   --title     override the post title (default: Tistory og:title).
               e.g. --title "[JS 강의] 1. 자바스크립트에 대한 개요"
 """
@@ -384,6 +386,10 @@ def main():
     if "--tags" in flags:
         raw = sys.argv[sys.argv.index("--tags") + 1]
         override_tags = [t.strip().lstrip("#") for t in raw.replace(",", " ").split() if t.strip()]
+    core_tags = None
+    if "--core-tags" in flags:
+        raw = sys.argv[sys.argv.index("--core-tags") + 1]
+        core_tags = [t.strip().lstrip("#") for t in raw.replace(",", " ").split() if t.strip()]
 
     t0 = time.time()
 
@@ -397,7 +403,8 @@ def main():
     chunks = m.split_content_into_chunks(
         post["content"], source_url=post["source_url"],
         published_iso=post["published_iso"],
-        tags=override_tags if override_tags is not None else post.get("tags"))
+        tags=override_tags if override_tags is not None else post.get("tags"),
+        core_tags=core_tags)
     n_img = sum(1 for c in chunks if c["type"] == "image")
     print(f"      {len(chunks)} chunks ({n_img} images) | title: {title}")
 

@@ -410,7 +410,7 @@ def _body_html_from_element(element):
     return f'<p>{"".join(parts)}</p>'
 
 
-def _build_footer_html(source_url, published_iso, tags=None):
+def _build_footer_html(source_url, published_iso, tags=None, core_tags=None):
     """Build the Tistory-migration footer HTML.
 
     Format (matches user spec):
@@ -421,7 +421,7 @@ def _build_footer_html(source_url, published_iso, tags=None):
 
     Returns the assembled HTML string, or '' if neither value is provided.
     """
-    if not source_url and not published_iso and not tags:
+    if not source_url and not published_iso and not tags and not core_tags:
         return ''
     parts = [BARRIER_HTML, BARRIER_HTML]
     if source_url:
@@ -456,10 +456,23 @@ def _build_footer_html(source_url, published_iso, tags=None):
             parts.append(
                 f'<p><span style="{BODY_SPAN_STYLE}">{_html_escape(hashtags)}</span></p>'
             )
+    if core_tags:
+        # 핵심 태그 블록. 전체 세트 아래에 빈 줄 하나를 두고 따로 붙인다.
+        # 사용자가 발행 레이어 태그란에 붙일 때 전체 세트와 핵심 세트를 골라
+        # 쓰기 때문에, 클립보드뿐 아니라 본문 footer에도 두 줄이 다 있어야 한다
+        # (2026-08-24 지시).
+        import re as _re
+        core_line = ' '.join('#' + _re.sub(r'\s+', '', t) for t in core_tags if t and t.strip())
+        if core_line:
+            parts.append(BARRIER_HTML)
+            parts.append(
+                f'<p><span style="{BODY_SPAN_STYLE}">{_html_escape(core_line)}</span></p>'
+            )
     return ''.join(parts)
 
 
-def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=None):
+def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=None,
+                             core_tags=None):
     """Split the parsed Tistory content into ordered chunks for the paste loop.
 
     Each chunk is either {'type': 'html', 'content': str} or
@@ -555,7 +568,8 @@ def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=No
     if current_html.strip():
         chunks.append({'type': 'html', 'content': current_html})
 
-    footer = _build_footer_html(source_url, published_iso, tags=tags)
+    footer = _build_footer_html(source_url, published_iso, tags=tags,
+                                core_tags=core_tags)
     if footer:
         chunks.append({'type': 'html', 'content': footer})
 
