@@ -16,10 +16,11 @@
 
 ## 사용할 도구 (우선순위)
 
-1. `/oh-my-claudecode:skillify` — 현재 세션의 반복 워크플로를 스킬 초안으로 추출
-2. `/oh-my-claudecode:skill` — 로컬 스킬 추가·삭제·검색·수정 위저드
-3. `skill-creator` (Anthropic 공식) — 처음부터 만들거나 description 최적화
-4. `superpowers:writing-skills` — 작성·검증 일반 프로세스
+1. `skill-creator` (Anthropic 공식) — 처음부터 만들거나 description 최적화, 평가·벤치마크
+2. `superpowers:writing-skills` — 작성·검증 일반 프로세스
+
+(2026-08-11에 oh-my-claudecode를 비활성화했으므로 `/oh-my-claudecode:skillify`와
+`/oh-my-claudecode:skill`은 더 이상 쓰지 않는다. HUD 상태줄만 남겨 뒀다.)
 
 이유: frontmatter 규칙·trigger description·디렉토리 구조를 도구가 강제하므로,
 "trigger 약한 스킬", "scripts 없는 반쪽 스킬" 같은 실수를 방지.
