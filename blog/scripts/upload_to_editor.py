@@ -9,9 +9,13 @@ blog/scripts/paste_to_naver.py는 "본문 붙여넣기"만 한다. 그 앞뒤로
 무인 실행 금지 규칙에 따라 각 단계에서 검증하고 실패하면 즉시 중단한다.
 사진이 하나도 안 들어갔거나 제목이 안 박히면 계속 쏘지 않는다.
 
-새 글은 **항상 새 창에 새 글쓰기 창을 열어서** 쓴다. 기존 글쓰기 탭을 재사용하거나
-비우지 않는다. 사용자가 에디터에서 직접 쓰던 원고가 날아가는 사고가 있었다(2026-08-21).
+새 글은 **항상 새 탭을 열어서** 쓴다. 기존 글쓰기 탭을 재사용하거나 비우지 않는다.
+사용자가 에디터에서 직접 쓰던 원고가 날아가는 사고가 있었다(2026-08-21).
 기존 탭은 손대지 않으므로 사용자가 하던 작업은 그대로 남는다.
+
+글쓰기 탭이 여러 개 열려 있어도 헷갈리지 않도록, 새로 연 탭의 **id를 잡아 두고**
+그 id로만 JS를 실행한다(migrate.chrome_js는 URL로 첫 탭을 찾기 때문에 그대로 두면
+남의 탭을 집는다). 탭을 다른 창으로 옮겨도 id는 유지되므로 창 순서에 영향받지 않는다.
 
 사용:
   upload_to_editor.py <draft_dir>
@@ -24,7 +28,7 @@ draft_dir 요구사항:
 본문을 다 올린 뒤 그 자리를 실제 동영상으로 바꾼다. 동영상은 캐럿 위치에 삽입되므로
 자리 문단을 통째로 선택해 지워 빈 문단에 캐럿을 남긴 뒤 업로더를 부른다.
 """
-import json, re, subprocess, sys, time
+import base64, json, re, subprocess, sys, time
 
 REPO = "/Users/bag-yoseb/Desktop/Project/personal/giraffe-skills"
 sys.path.insert(0, f"{REPO}/tistory-to-naver/scripts")
@@ -75,18 +79,49 @@ JS_VIDEO_COUNT = ("String(document.querySelectorAll('.se-component.se-video, "
                   ".se-component.se-videoDetail').length)")
 
 
-def open_fresh_window():
-    """새 Chrome 창을 만들어 글쓰기 페이지를 연다.
+def make_chrome_js(tab_id):
+    """지정한 탭에서만 JS를 실행하는 함수를 만든다.
 
-    기존 글쓰기 탭을 재사용하지 않는 이유는 단순하다. 그 탭에는 사용자가 직접 쓰던
-    원고가 들어 있을 수 있고, 한 번 비우면 되돌릴 방법이 없다.
-    새 창을 만들면 그 창이 window 1이 되므로, URL로 탭을 찾는 migrate.chrome_js가
-    항상 이 창의 글쓰기 탭을 먼저 집는다. 사용자의 기존 탭은 건드리지 않는다.
+    migrate.chrome_js는 "URL에 /postwrite가 든 첫 탭"을 쓴다. 글쓰기 탭이 여러 개면
+    남의 탭에 글을 쏟아붓게 되므로, 우리가 연 탭의 id로 못박는다.
+    """
+    def f(js_source, timeout=10):
+        b64 = base64.b64encode(js_source.encode("utf-8")).decode("ascii")
+        wrapped = f"eval(decodeURIComponent(escape(atob('{b64}'))))"
+        script = ('tell application "Google Chrome"\n'
+                  "repeat with w in windows\n"
+                  "repeat with t in tabs of w\n"
+                  # `id of t is N`은 매칭에 실패한다. 정수로 캐스팅해 비교해야 잡힌다.
+                  f"if (id of t as integer) = {tab_id} then\n"
+                  f'return execute t javascript "{wrapped}"\n'
+                  "end if\nend repeat\nend repeat\n"
+                  'return "NO_TAB"\n'
+                  "end tell")
+        out = subprocess.run(["osascript", "-e", script], capture_output=True,
+                             text=True, timeout=timeout)
+        if out.returncode != 0:
+            raise RuntimeError(f"chrome_js: {out.stderr.strip()}")
+        return out.stdout.strip()
+    return f
+
+
+def open_fresh_tab():
+    """새 탭에 글쓰기 페이지를 연다. 기존 탭은 건드리지 않는다.
+
+    그 탭에는 사용자가 직접 쓰던 원고가 들어 있을 수 있고, 한 번 비우면 되돌릴 방법이 없다.
+    임시저장도 슬롯이 몇 개뿐이라 안전망이 못 된다. 새로 여는 편이 언제나 싸다.
     """
     url = M.POSTWRITE_URL.format(blog_id=M.BLOG_ID)
-    M.osa('tell application "Google Chrome" to make new window')
+    M.osa('tell application "Google Chrome" to activate')
+    time.sleep(0.5)
+    M.osa('tell application "Google Chrome" to tell window 1 to '
+          f'make new tab at end of tabs with properties {{URL:"{url}"}}')
     time.sleep(1.0)
-    M.osa(f'tell application "Google Chrome" to set URL of active tab of window 1 to "{url}"')
+    tab_id = M.osa('tell application "Google Chrome" to get id of last tab of window 1')
+    M.osa('tell application "Google Chrome" to set active tab index of window 1 to '
+          '(count of tabs of window 1)')
+    # 이후 M의 모든 JS 호출(style_pass 등)이 이 탭만 보게 못박는다
+    M.chrome_js = make_chrome_js(tab_id)
     for _ in range(25):
         time.sleep(1.0)
         try:
@@ -95,10 +130,9 @@ def open_fresh_window():
         except Exception:
             pass
     else:
-        print("[ABORT] 글쓰기 창이 안 뜸"); sys.exit(2)
-    M.osa('tell application "Google Chrome" to set index of window 1 to 1')
-    M.osa('tell application "Google Chrome" to activate')
-    time.sleep(0.8)
+        print("[ABORT] 글쓰기 탭이 안 뜸"); sys.exit(2)
+    print(f"      새 탭 id={tab_id}")
+    time.sleep(0.5)
 
 
 def frontmost():
@@ -171,8 +205,8 @@ def main():
     meta = json.loads(open(f"{draft}/meta.json", encoding="utf-8").read())
     title = meta["title_candidates"][0]
 
-    print("[1/7] 새 글쓰기 창 열기")
-    open_fresh_window()
+    print("[1/7] 새 글쓰기 탭 열기")
+    open_fresh_tab()
     M.chrome_js(M.JS_DISMISS_DIALOG)   # "작성 중인 글" 복구 물음은 취소
     time.sleep(0.6)
     if not guard():
@@ -190,9 +224,9 @@ def main():
     n = int(M.chrome_js(M.JS_COMPONENT_COUNT))
     print(f"      컴포넌트 {n}개")
     if n > 2:
-        # 새 창인데 내용이 있다는 건 복구 물음을 못 닫았다는 뜻이다.
+        # 새 탭인데 내용이 있다는 건 복구 물음을 못 닫았다는 뜻이다.
         # 남의 원고일 수 있으니 절대 지우지 않고 멈춘다.
-        print("[ABORT] 새 창인데 본문이 비어 있지 않음. 사람이 확인할 것."); sys.exit(3)
+        print("[ABORT] 새 탭인데 본문이 비어 있지 않음. 사람이 확인할 것."); sys.exit(3)
 
     print("[2/7] 제목 입력")
     M.copy_text(title)
