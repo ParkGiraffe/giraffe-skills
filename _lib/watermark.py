@@ -1,68 +1,102 @@
 #!/usr/bin/env python3
-"""사진 우하단에 블로그 주소 워터마크를 굽는다.
+"""사진 우하단에 blog.naver.com/op5321 워터마크를 굽는다. (리포 정본)
 
-op5321 기존 글에서 실측한 값을 그대로 재현한다. 네이버가 본문 이미지를 폭 966px로
-줄여 보여주므로, 그 표시 크기를 기준으로 값을 잡아 두고 사진마다 폭 비율로 환산한다.
-그래야 720px 사진이든 4032px 사진이든 발행 후 워터마크가 같은 크기로 보인다.
+한때 tistory-to-naver와 blog 쪽에 같은 기능이 따로 있었다. 두 대의 컴퓨터에서
+각자 만들어져 상수도 폰트 경로도 달랐다. 여기로 합치고 양쪽이 이 파일을 쓴다.
 
-실측 기준 (표시 폭 966px):
-  도현체 29px / 박스 높이 38px / 글자 둘레 여백 3px / 검정 알파 0.44
-  우측 여백 1px, 하단 여백 0px (모서리에 붙임)
+스타일 상수는 **사용자 확정값(2026-08-20)** 이다. 네이버 수기 발행본을 표시 폭
+966px에서 실측하고 사용자 피드백으로 조정한 값이라 임의로 바꾸지 않는다:
+  - 반투명 검정 바가 우측·하단 모서리에 딱 붙고 흰색 배달의민족 도현체
+  - 글자 높이 = 이미지 폭의 2.57% (실물보다 살짝 작게)
+  - 불투명도 150/255. "뒤에 비쳐도 되니까 검게 하지 말 것"이 사용자 지시라
+    완전 불투명으로 올리지 않는다.
+  - 글자가 바에 거의 꽉 차게. 여백을 크게 잡으면 사용자가 바로 지적한다.
+(2026-08-13에 blog 쪽에서 쓰던 값은 도현체 29px@966에 알파 0.44였다. 크기는 거의
+같고 진하기만 달랐는데, 더 나중에 확정된 위 값으로 통일했다.)
 
---scale로 전체 크기를 줄이거나 키운다. 2026-08-13 사용자 확정값은 0.85.
+크기를 사진 폭 비율로 잡는 이유는 네이버가 본문 이미지를 폭 966px로 줄여 보여주기
+때문이다. 720px 사진이든 4032px 사진이든 발행 후 워터마크가 같은 크기로 보인다.
 
-사용:
-  watermark.py <입력폴더|파일> <출력폴더> [--text ...] [--scale 0.85]
+GIF는 프레임이 깨지므로 건너뛴다.
+
+두 가지로 쓴다:
+  add_watermark(path)            파일을 제자리에서 처리 (마이그레이션 중 내려받은 사진)
+  watermark.py <입력> <출력>      폴더를 통째로 새 폴더에 (원본 보존이 필요할 때)
 """
-import argparse, pathlib, sys
+import argparse, os, pathlib, sys
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-FONT = "/Users/bag-yoseb/Library/Fonts/BMDOHYEON_otf.otf"
+# 폰트 파일명이 설치 시점에 따라 다르다. 있는 것을 쓴다.
+FONT_CANDIDATES = [
+    "~/Library/Fonts/BMDOHYEON_otf.otf",
+    "~/Library/Fonts/BM_Dohyeon.otf",
+    "/Library/Fonts/BMDOHYEON_otf.otf",
+    "/Library/Fonts/BM_Dohyeon.otf",
+]
 TEXT = "blog.naver.com/op5321"
-
-REF_W = 966.0
-FONT_PX = 29.0
-PAD_PX = 3.0
-MARGIN_R = 1.0
-MARGIN_B = 0.0
-ALPHA = 0.44
+FONT_RATIO = 0.0257     # 글자 높이 / 이미지 폭
+OPACITY = 150           # 검정 바 알파 (0-255)
+BAR_RGB = (20, 20, 20)
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".heic"}
 
 
-def stamp(im: Image.Image, text: str = TEXT, scale: float = 0.85) -> Image.Image:
+def font_path():
+    for c in FONT_CANDIDATES:
+        p = os.path.expanduser(c)
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(
+        "배달의민족 도현체를 찾을 수 없습니다. 다음 중 하나에 설치하세요:\n  "
+        + "\n  ".join(FONT_CANDIDATES))
+
+
+def stamp(im: Image.Image, text: str = TEXT, scale: float = 1.0,
+          opacity: int = OPACITY) -> Image.Image:
     """한 장에 워터마크를 얹어 돌려준다. EXIF 회전은 픽셀로 반영한다."""
     im = ImageOps.exif_transpose(im).convert("RGB")
-    w, h = im.size
-    k = w / REF_W * scale
-    size = max(9, round(FONT_PX * k))
-    pad = max(1, round(PAD_PX * k))
-    mr, mb = round(MARGIN_R * k), round(MARGIN_B * k)
+    W, H = im.size
+    font_px = max(16, int(W * FONT_RATIO * scale))
+    font = ImageFont.truetype(font_path(), font_px)
 
-    font = ImageFont.truetype(FONT, size)
-    # 도현체는 메트릭 여백이 넓어 폰트 높이로 박스를 잡으면 위아래가 떠 보인다.
-    # 실제 잉크 범위(getbbox)로 재야 실측값과 맞는다.
-    probe = Image.new("L", (size * len(text) + 80, size * 3), 0)
-    ImageDraw.Draw(probe).text((20, 20), text, 255, font=font)
-    bb = probe.getbbox()
-    tw, th = bb[2] - bb[0], bb[3] - bb[1]
+    # 도현체는 메트릭 여백이 넓어 폰트 높이로 바를 잡으면 글자가 떠 보인다.
+    # 실제 잉크 범위(textbbox)로 재야 "글자가 바에 꽉 찬" 확정 스타일이 나온다.
+    x0, y0, x1, y1 = ImageDraw.Draw(im).textbbox((0, 0), text, font=font)
+    tw, th = x1 - x0, y1 - y0
+    pad_x = max(3, int(font_px * 0.14))
+    pad_y = max(2, int(font_px * 0.09))
+    bar_w, bar_h = tw + pad_x * 2, th + pad_y * 2
 
-    bw, bh = tw + pad * 2, th + pad * 2
-    x0, y0 = w - mr - bw, h - mb - bh
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(overlay)
+    bx0, by0 = W - bar_w, H - bar_h
+    d.rectangle([bx0, by0, W, H], fill=BAR_RGB + (opacity,))
+    d.text((bx0 + pad_x - x0, by0 + pad_y - y0), text, font=font,
+           fill=(255, 255, 255, 255))
+    return Image.alpha_composite(im.convert("RGBA"), overlay).convert("RGB")
 
-    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    d.rectangle([x0, y0, x0 + bw - 1, y0 + bh - 1], fill=(0, 0, 0, round(255 * ALPHA)))
-    d.text((x0 + pad - (bb[0] - 20), y0 + pad - (bb[1] - 20)), text,
-           (255, 255, 255, 255), font=font)
-    return Image.alpha_composite(im.convert("RGBA"), layer).convert("RGB")
+
+def add_watermark(path, text=TEXT, opacity=OPACITY):
+    """파일을 제자리에서 처리. GIF·미지원 포맷은 그대로 둔다.
+
+    마이그레이션 도중 내려받은 사진에 쓴다. 성공 True, 건너뜀/실패 False.
+    """
+    try:
+        im = Image.open(path)
+        if im.format == "GIF" or getattr(im, "is_animated", False):
+            return False
+        stamp(im, text, opacity=opacity).save(path, quality=92)
+        return True
+    except Exception as e:
+        print(f"[watermark] 실패({os.path.basename(path)}): {e}")
+        return False
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("src")
-    ap.add_argument("dst")
+    ap.add_argument("src"); ap.add_argument("dst")
     ap.add_argument("--text", default=TEXT)
-    ap.add_argument("--scale", type=float, default=0.85)
+    ap.add_argument("--scale", type=float, default=1.0,
+                    help="확정 상수에 곱할 배율. 보통 건드리지 않는다.")
     a = ap.parse_args()
 
     src, dst = pathlib.Path(a.src), pathlib.Path(a.dst)

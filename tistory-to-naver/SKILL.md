@@ -85,7 +85,8 @@ python3 tistory-to-naver/scripts/migrate_fresh_tab.py '<TISTORY_URL>' \
 
 **워터마크 (2026-08-20 도입)**: 다운로드되는 모든 사진 우측 하단에
 `blog.naver.com/op5321`(배달의민족 도현체, 글자 높이 = 폭의 2.57%, 불투명도 150)을
-자동 삽입한다 (`scripts/watermark.py`, 스타일 상수는 사용자 확정값 — 임의 변경 금지).
+자동 삽입한다 (정본은 리포 공용 `_lib/watermark.py`, `scripts/watermark.py`는 그걸 넘겨주는
+래퍼다. 스타일 상수는 사용자 확정값 — 임의 변경 금지).
 GIF는 프레임이 깨지므로 건너뛴다. 끄려면 `WATERMARK=0` 환경변수.
 이미지 캐시(`scripts/images/`)는 매 실행 전 자동으로 비운다 — 캐시 재사용 시
 이전 실행의 다른 워터마크 스타일이 섞여 들어가는 사고가 있었다.
