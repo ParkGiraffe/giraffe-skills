@@ -351,7 +351,9 @@ def check(text, rules, exceptions, heuristic=False):
             )
             matched_spans.append((match.start(), match.end()))
 
-    findings.extend(_check_endings(text, masked, starts, lines, scopes, matched_spans))
+    findings.extend(
+        _check_endings(text, masked, starts, lines, scopes, matched_spans, heuristic)
+    )
     findings.extend(_check_headings(text, masked, starts, lines))
     findings.sort(key=lambda f: (f.line, f.col))
     return findings
@@ -369,6 +371,7 @@ def _prose_blocks(masked, lines, scopes, starts):
             and scopes[index] == "prose"
             and masked_line.strip()
             and not META_LINE.match(line.strip())
+            and not IMAGE_LINE.match(line.strip())
         )
         if is_prose:
             if current is None:
@@ -383,7 +386,25 @@ def _prose_blocks(masked, lines, scopes, starts):
     return blocks
 
 
-def _check_endings(text, masked, starts, lines, scopes, matched_spans):
+IMAGE_LINE = re.compile(r"^!\[|^\s*<img\b|^\[영상")
+
+
+def _split_by_image(lines, index):
+    """다음 비어 있지 않은 줄이 사진인지 봅니다.
+
+    블로그 캡션은 한 문장을 사진 사이에 쪼개 놓는 경우가 있습니다.
+    `사막에 사는 겔드족은 풍요로운 대지를 찾아` 다음에 사진이 오고
+    `몇 번이고 침범했습니다` 로 이어지는 형태입니다. 이때 앞 조각은
+    문장이 끊긴 것이 아니라 이어지는 중이므로 어체를 판정하지 않습니다.
+    """
+    for line in lines[index + 1:]:
+        if not line.strip():
+            continue
+        return bool(IMAGE_LINE.match(line.strip()))
+    return False
+
+
+def _check_endings(text, masked, starts, lines, scopes, matched_spans, heuristic=False):
     """문장 종결이 합쇼체인지 봅니다. 규칙표가 잡은 자리는 건너뜁니다."""
     findings = []
     for begin, end in _prose_blocks(masked, lines, scopes, starts):
@@ -406,6 +427,19 @@ def _check_endings(text, masked, starts, lines, scopes, matched_spans):
             if any(s < abs_end <= e + 1 for s, e in matched_spans):
                 continue
             line_no, col = locate(starts, abs_end - 1)
+            # 종결부호 없이 끝났고 바로 뒤가 사진이면 문장이 사진을 사이에 두고
+            # 이어지는 중입니다. 블로그 캡션에서 쓰는 구성이라 기본 검사에서는 빼고,
+            # 읽는 흐름이 끊긴다는 판단도 가능하므로 --heuristic 에서만 보고합니다.
+            if sentence[-1] not in ".!?" and _split_by_image(lines, line_no - 1):
+                if not heuristic:
+                    continue
+                findings.append(
+                    Finding(
+                        line_no, col, "의심", tail[-6:], "(사진 사이로 문장이 끊깁니다)",
+                        4, "문장 구조", "KW-4-SPLITCAPTION",
+                    )
+                )
+                continue
             findings.append(
                 Finding(
                     line_no, col, "검토", tail[-6:], "(합쇼체로)",

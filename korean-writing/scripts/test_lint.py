@@ -139,6 +139,23 @@ class EndingTest(unittest.TestCase):
         findings = run("참고: 이 값은 매번 다시 계산된다.\n")
         self.assertTrue(any(f.section == 3 for f in findings))
 
+    def test_caption_split_by_image_skipped(self):
+        text = ("사막에 사는 겔드족은 풍요로운 대지를 찾아\n\n"
+                "![](images/z01_039.jpg)\n\n"
+                "몇 번이고 다른 종족의 땅을 침범했습니다.\n")
+        self.assertEqual([], run(text))
+        findings = run(text, heuristic=True)
+        self.assertTrue(any(f.rid == "KW-4-SPLITCAPTION" for f in findings))
+
+    def test_broken_sentence_without_image_still_reported(self):
+        text = ("사막에 사는 겔드족은 풍요로운 대지를 찾아\n\n"
+                "다음 문단입니다.\n")
+        findings = run(text)
+        self.assertTrue(any(f.rid == "KW-3-ENDING" for f in findings))
+
+    def test_media_placeholder_line_skipped(self):
+        self.assertEqual([], run("[영상 자리 : images/v01_시작의대지_도착.mp4]\n"))
+
     def test_sentence_across_lines(self):
         text = "이 값은 요청마다 다시 계산되므로 캐시를 두지\n않으면 비용이 크게 늘어난다.\n"
         findings = run(text)
