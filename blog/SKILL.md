@@ -79,6 +79,16 @@ grep -rP '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]' .claude/blog-corpus/drafts/<di
 ```
 결과가 비어야 함. 비어있지 않으면 해당 파일을 수정하고 재검수.
 
+이어서 `korean-writing` 스킬의 검증 패스를 돌린다. 규칙 정본과 판정법이 그 스킬에 있다.
+
+```bash
+python3 korean-writing/scripts/lint.py .claude/blog-corpus/drafts/<dir>/script.md
+```
+
+종료 코드가 0이 아니면 업로드하지 않는다. `고침` 갈래는 `--fix`로 반영하고, `검토`·`제목`
+갈래는 사람이 판단해 고친 뒤 다시 돌린다. 대본이 300자 이상이면
+`korean-writing/references/judgments.md` 끝의 지시문으로 적대적 검증 2단계까지 돌린다.
+
 ### 6. 사용자 보고 (필수 템플릿)
 
 드래프트 작성을 마치면 **반드시** 아래 4가지를 사용자에게 출력해야 한다. 하나라도 빼먹지 말 것.
