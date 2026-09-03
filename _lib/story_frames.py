@@ -12,9 +12,9 @@
 콘택트 시트로 확인해 plan.json을 고친 뒤(sheet), 합성·크롭·제외를 적용해 초안 폴더의
 images/와 script.md 뼈대, meta.json을 만든다(render). check는 캡션이 마침표로 끝나는지 본다.
 
-유형 추정은 고정 영역의 단순 통계다. 결과 화면은 상단 띠와 전적 상자가 어둡고, 전투 대사
-박스는 좌하단 상자가 어두우면서 흰 글자가 있고, 컷신 자막은 하단 띠에 검은 테두리의 흰
-글자가 있다. 틀릴 수 있으므로 콘택트 시트 확인을 건너뛰지 않는다.
+유형 추정은 고정 영역의 단순 통계다. 결과 화면은 전적 세 줄이 모두 어둡고 흰 글자가 있고,
+전투 대사 박스는 좌하단 상자가 어두우면서 흰 글자가 있고, 컷신 자막은 하단 띠에 검은
+테두리의 흰 글자가 있다. 틀릴 수 있으므로 콘택트 시트 확인을 건너뛰지 않는다.
 """
 from __future__ import annotations
 
@@ -36,12 +36,12 @@ TOP_REGION = (0, 0, 1920, 820)
 SUBTITLE_BAND = (0, 830, 1920, 1030)
 DIALOG_BOX = (340, 760, 1580, 990)
 DIALOG_TEXT = (620, 790, 1540, 960)
-RESULT_BAND = (0, 105, 1920, 215)
-RESULT_ROW = (330, 340, 1050, 390)
+RESULT_ROWS = [(330, 340, 1050, 390), (330, 435, 1050, 485), (330, 530, 1050, 580)]
 PRESETS = {"popup": (398, 57, 1521, 1023), "scroll": (0, 830, 1920, 1030)}
 BANDS = {"subtitle": SUBTITLE_BAND, "dialog": DIALOG_BOX}
 SEP = 4
-TEXT_RATIO = 0.003
+TEXT_RATIO = 0.0015
+RESULT_TEXT_RATIO = 0.008
 STAMP16_RE = re.compile(r"(\d{16})")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 CAPTION_MARK = "<!-- 캡션 -->"
@@ -101,7 +101,8 @@ def outline_ratio(img: Image.Image, box, size=(640, 66)) -> float:
 
 
 def classify(img: Image.Image) -> str:
-    if dark_ratio(img, RESULT_BAND) > 0.85 and dark_ratio(img, RESULT_ROW) > 0.9:
+    if all(dark_ratio(img, box) > 0.7 and outline_ratio(img, box) > RESULT_TEXT_RATIO
+           for box in RESULT_ROWS):
         return "result"
     if dark_ratio(img, DIALOG_TEXT) > 0.55 and outline_ratio(img, DIALOG_TEXT) > TEXT_RATIO:
         return "dialog"

@@ -41,7 +41,11 @@ def result_screen() -> Image.Image:
     im = Image.new("RGB", sf.FRAME, (200, 190, 170))
     d = ImageDraw.Draw(im)
     d.rectangle([0, 100, 1920, 220], fill=(40, 30, 20))
-    d.rectangle([310, 330, 1060, 400], fill=(30, 30, 30))
+    font = sf.load_font(36)
+    for label, top in (("배틀 클리어", 330), ("격파 수", 425), ("클리어 타임", 520)):
+        d.rectangle([310, top, 1060, top + 70], fill=(30, 30, 30))
+        d.text((350, top + 15), label, fill="white", font=font)
+        d.text((950, top + 15), "500", fill="white", font=font)
     return im
 
 
@@ -77,9 +81,9 @@ class PlanTest(unittest.TestCase):
         self.ep.mkdir()
         self.orig = self.td / "orig"
         self.orig.mkdir()
-        with_subtitle(base_frame(0), "첫 대사").save(self.ep / "001_#0_2026072007314700_s.jpg")
-        with_subtitle(base_frame(0), "둘째 대사").save(self.ep / "002_#1_2026072007315200_s.jpg")
-        with_subtitle(base_frame(0), "셋째 대사").save(self.ep / "003_#2_2026072007321700_s.jpg")
+        with_subtitle(base_frame(0), "여기가 과거라는 것을 확인합니다").save(self.ep / "001_#0_2026072007314700_s.jpg")
+        with_subtitle(base_frame(0), "봉인 전쟁이라고 부르는 시대입니다").save(self.ep / "002_#1_2026072007315200_s.jpg")
+        with_subtitle(base_frame(0), "타이틀이 뜨고 이야기가 시작됩니다").save(self.ep / "003_#2_2026072007321700_s.jpg")
         base_frame(3).save(self.ep / "004_#3_2026072007332400_s.jpg")
         result_screen().save(self.ep / "005_#4_2026072007342300_s.jpg")
         # 손 크롭본과 그 원본
