@@ -198,3 +198,38 @@ python3 blog/scripts/upload_to_editor.py .claude/blog-corpus/drafts/<드래프�
 - **포코피아 등 포켓몬 계열 글에서 도감 설명을 다룰 때, 포켓몬 키(`키 1.0m`)와 몸무게(`몸무게 45kg`)는 쓰지 말 것.** 사용자가 키/몸무게엔 관심 없음을 명시. 도감 본문 설명, 타입, 분류(뼈다귀포켓몬 등)는 그대로 인용해도 무방.
 - 공략/리뷰 글은 사실 왜곡 금지. 주제 한 줄에 내가 모르는 구체적 수치(스킬 데미지, 스탯값 등)가 포함돼 있으면 꾸며내지 말고 `[확인 필요: ...]`로 남기거나 사용자에게 반문할 것.
 - 카테고리는 반드시 `index.json`에 이미 존재하는 것 중 하나. 새 카테고리 만들지 말 것.
+
+## 게임 스토리 연재 (스위치 캡처 사진·영상 파이프라인)
+
+스토리 게임을 미션 단위로 연재할 때 씁니다. 2026-09-03 젤다무쌍 봉인전기 18편 설계에서
+확정한 절차이며, 사진 1,100장과 클립 103개를 기준으로 검증했습니다.
+
+규칙 요약:
+- 캡션은 상황 서술만 씁니다. 사진에 보이는 대사를 다시 적지 않고 낫표 인용을 쓰지 않습니다.
+  클리어 타임 같은 결과 화면 수치도 쓰지 않습니다. 캡션은 반드시 마침표로 끝냅니다.
+- 결과 화면, 챕터 메뉴, 배틀 챌린지 사진은 뺍니다. 튜토리얼 팝업은 첫 편에 두세 장만 둡니다.
+- 같은 구도에 자막만 바뀌는 연속 컷은 첫 장을 원본으로 두고 나머지 자막 띠를 세로로 이어
+  붙인 합성 이미지 한 장으로 줄입니다. 강적에 전투 영상이 있으면 전투 사진은 이름 카드와
+  액션 한 장으로 줄입니다.
+- 영상은 강적마다 전투 모션 하나를 원칙으로 두고, 편당 1~3개, 60초 안팎입니다.
+
+영상 (`_lib/switch_clips.py`):
+1. `switch_clips.py scan <원본 폴더> --out <작업 폴더>`: 클립을 촬영 건으로 묶어 `sessions.json`.
+   스위치 30초 제한으로 쪼개진 클립은 틈 3초 이내면 같은 촬영입니다.
+2. `switch_clips.py strips <작업 폴더> --session S51`: 1초 간격 프레임 띠. 앞뒤 자를 초를 정합니다.
+3. `videos.json`에 `{"episode", "slot", "title", "sessions", "in", "out"}`를 적고
+   `switch_clips.py render <작업 폴더> videos.json --out <초안>/images --episode N`.
+   자르기가 없으면 무손실 병합, 있으면 재인코딩입니다. `videos_meta.json`이 함께 나옵니다.
+
+사진 (`_lib/story_frames.py`):
+1. `story_frames.py scan <편 폴더> --out <작업 폴더> --originals <원본 폴더>`: 유형 추정과
+   같은 구도 묶기로 `plan.json`. 손 크롭본은 원본으로 되돌립니다.
+2. `story_frames.py sheet <작업 폴더>`: 콘택트 시트를 눈으로 보고 `plan.json`을 고칩니다.
+   틀린 묶음을 풀고, 뺄 사진을 `skip`으로, 팝업을 `crop`으로, 영상 자리를 `video`로,
+   장면 전환을 `heading`으로 적습니다. 이 단계를 건너뛰지 않습니다.
+3. `story_frames.py render <작업 폴더> --out <초안> --title "<제목>" --category-no N`:
+   `images/`, `script.md` 뼈대, `meta.json`. 워터마크까지 들어갑니다.
+4. `script.md`의 `<!-- 도입 -->`과 `<!-- 캡션 -->`을 채운 뒤
+   `story_frames.py check script.md`와 `korean-writing/scripts/lint.py script.md`를 통과시킵니다.
+5. 업로드는 평소대로 `blog/scripts/upload_to_editor.py <초안>`입니다. `meta.json`의
+   `videos_folder`와 `videos[]`를 이 파이프라인이 미리 채워 둡니다.
