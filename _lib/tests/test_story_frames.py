@@ -235,8 +235,8 @@ class RenderTest(unittest.TestCase):
             self.assertEqual(im.size, (1920, 404))
         self.assertEqual(meta["images"]["count"], 5)
         self.assertEqual(meta["videos"],
-                        [{"file": "01_v01_시작의 대지 도착.mp4", "slot": "v01", "title": "시작의 대지 도착"}])
-        self.assertEqual(meta["videos_folder"], str((out / "images").resolve()))
+                        [{"file": "images/01_v01_시작의 대지 도착.mp4", "slot": "v01", "title": "시작의 대지 도착"}])
+        self.assertEqual(meta["videos_folder"], str(out.resolve()))
         self.assertEqual(meta["title_candidates"], ["[젤다무쌍 봉인전기] 1. 테스트"])
         md = (out / "script.md").read_text(encoding="utf-8")
         self.assertIn('title: "[젤다무쌍 봉인전기] 1. 테스트"', md)

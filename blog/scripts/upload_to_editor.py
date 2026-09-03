@@ -122,7 +122,7 @@ def open_fresh_tab():
           '(count of tabs of window 1)')
     # 이후 M의 모든 JS 호출(style_pass 등)이 이 탭만 보게 못박는다
     M.chrome_js = make_chrome_js(tab_id)
-    for _ in range(25):
+    for _ in range(90):   # 에디터 로딩이 30초를 넘기는 경우가 있어 90초까지 기다린다 (2026-09-03)
         time.sleep(1.0)
         try:
             if M.chrome_js("document.querySelector('.se-canvas') ? 'ready' : 'loading'") == "ready":

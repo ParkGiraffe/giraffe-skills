@@ -73,6 +73,8 @@ def list_images(d: pathlib.Path | None) -> list[pathlib.Path]:
 
 
 def strip_frontmatter(src: str) -> str:
+    # <!-- ... --> 마크다운 주석은 검사기용 표식이라 본문에 붙여 넣지 않는다 (2026-09-03)
+    src = re.sub(r"<!--.*?-->", "", src, flags=re.S)
     if not src.startswith("---\n"):
         return src
     end = src.find("\n---\n", 4)

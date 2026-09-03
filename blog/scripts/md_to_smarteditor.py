@@ -195,6 +195,7 @@ def convert(src: str, images_dir: pathlib.Path | None = None,
             title_override: str | None = None,
             embed: bool = False) -> str:
     fm, body = parse_frontmatter(src)
+    body = re.sub(r"<!--.*?-->", "", body, flags=re.S)   # 검사기용 마크다운 주석은 본문에서 뺀다
     title = title_override or fm.get("title") or ""
     category = fm.get("category") or ""
 

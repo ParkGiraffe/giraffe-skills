@@ -314,7 +314,9 @@ def render(plan: dict, out_dir: pathlib.Path, title: str, category: str,
                 if not slot:
                     m = VIDEO_SLOT_RE.match(it["file"])
                     slot = m.group(1) if m else None
-                videos.append({"file": it["file"], "slot": slot, "title": it.get("title") or it["file"]})
+                # upload_to_editor.place_videos가 videos_folder + 자리 문단의 경로(images/...)를 이어 붙이므로
+                # file은 초안 폴더 기준 상대 경로로 적는다
+                videos.append({"file": f"images/{it['file']}", "slot": slot, "title": it.get("title") or it["file"]})
                 continue
             n += 1
             if t == "photo":
@@ -347,7 +349,7 @@ def render(plan: dict, out_dir: pathlib.Path, title: str, category: str,
         "category_no": category_no,
         "hashtags": [],
         "images": {"count": count, "source_folder": str(images.resolve())},
-        "videos_folder": str(images.resolve()),
+        "videos_folder": str(out_dir.resolve()),
         "videos": videos,
     }
     write_json(out_dir / "meta.json", meta)
