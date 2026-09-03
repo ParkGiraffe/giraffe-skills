@@ -38,7 +38,8 @@ SUBTITLE_BAND = (0, 830, 1920, 1030)
 DIALOG_BOX = (340, 760, 1580, 990)
 DIALOG_TEXT = (620, 790, 1540, 960)
 RESULT_ROWS = [(330, 340, 1050, 390), (330, 435, 1050, 485), (330, 530, 1050, 580)]
-PRESETS = {"popup": (398, 57, 1521, 1023), "scroll": (0, 830, 1920, 1030)}
+PRESETS = {"popup": (398, 57, 1521, 1023), "scroll": (0, 830, 1920, 1030),
+           "scroll_wide": (200, 440, 1720, 1040)}   # 두루마리 전체(그림+세 줄 글)
 BANDS = {"subtitle": SUBTITLE_BAND, "dialog": DIALOG_BOX}
 SEP = 4
 TEXT_RATIO = 0.0015
