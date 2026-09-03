@@ -130,7 +130,10 @@ def render_strip(raw_dir: pathlib.Path, session: dict, out_path: pathlib.Path,
         for k, name in enumerate(session["files"]):
             sub = pathlib.Path(td) / f"c{k}"
             sub.mkdir()
-            frames = [Image.open(f).copy() for f in extract_frames(raw_dir / name, step, width, sub)]
+            frames = []
+            for f in extract_frames(raw_dir / name, step, width, sub):
+                with Image.open(f) as im:
+                    frames.append(im.copy())
             rows.append((offset, frames))
             offset += session["durs"][k]
     h = max(im.height for _, fr in rows for im in fr)
@@ -162,6 +165,81 @@ def cmd_strips(args) -> None:
         print(f"{s['id']} -> {p}")
 
 
+def concat_copy(raw_dir: pathlib.Path, files: list[str], out_path: pathlib.Path) -> None:
+    """같은 촬영의 클립을 재인코딩 없이 이어 붙인다."""
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        for name in files:
+            p = str((raw_dir / name).resolve()).replace("'", r"'\''")
+            f.write(f"file '{p}'\n")
+        lst = f.name
+    try:
+        subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "concat", "-safe", "0",
+                        "-i", lst, "-c", "copy", "-movflags", "+faststart", str(out_path)],
+                       check=True)
+    finally:
+        pathlib.Path(lst).unlink(missing_ok=True)
+
+
+def trim_reencode(src: pathlib.Path, out_path: pathlib.Path, start: float, end: float | None) -> None:
+    """start초부터 end초까지 잘라 재인코딩한다. end가 None이면 끝까지다.
+
+    -ss를 입력 뒤에 두어 프레임 단위로 정확히 자른다. 오디오는 컷 지점 동기화를 위해
+    AAC 128kbps로 다시 인코딩한다.
+    """
+    cmd = [FFMPEG, "-v", "error", "-y", "-i", str(src), "-ss", f"{start:.3f}"]
+    if end is not None:
+        cmd += ["-t", f"{end - start:.3f}"]
+    cmd += ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(out_path)]
+    subprocess.run(cmd, check=True)
+
+
+def safe_name(title: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r'[\\/:*?"<>|]+', " ", title)).strip()
+
+
+def render_entry(entry: dict, sessions_by_id: dict, raw_dir: pathlib.Path,
+                 out_dir: pathlib.Path) -> dict:
+    files: list[str] = []
+    for sid in entry["sessions"]:
+        files += sessions_by_id[sid]["files"]
+    name = f"{int(entry['episode']):02d}_{entry['slot']}_{safe_name(entry['title'])}.mp4"
+    out_path = out_dir / name
+    start = float(entry.get("in") or 0.0)
+    end = entry.get("out")
+    if start <= 0 and end is None:
+        concat_copy(raw_dir, files, out_path)
+        mode = "copy"
+    else:
+        with tempfile.TemporaryDirectory() as td:
+            joined = pathlib.Path(td) / "joined.mp4"
+            concat_copy(raw_dir, files, joined)
+            trim_reencode(joined, out_path, start, None if end is None else float(end))
+        mode = "reencode"
+    return {"file": name, "slot": entry["slot"], "title": entry["title"],
+            "sessions": entry["sessions"],
+            "duration": round(probe_duration(out_path), 2), "mode": mode}
+
+
+def cmd_render(args) -> None:
+    work = pathlib.Path(args.work_dir).expanduser().resolve()
+    data = read_json(work / "sessions.json")
+    raw_dir = pathlib.Path(data["raw_dir"])
+    by_id = {s["id"]: s for s in data["sessions"]}
+    entries = read_json(pathlib.Path(args.videos).expanduser().resolve())
+    if args.episode is not None:
+        entries = [e for e in entries if int(e["episode"]) == args.episode]
+    out_dir = pathlib.Path(args.out).expanduser().resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+    for e in entries:
+        r = render_entry(e, by_id, raw_dir, out_dir)
+        results.append(r)
+        print(f"{r['file']}  {r['duration']}s  {r['mode']}")
+    write_json(out_dir / "videos_meta.json", results)
+    print(f"영상 {len(results)}개 -> {out_dir}")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -177,6 +255,13 @@ def main(argv=None) -> int:
     p.add_argument("--session", action="append")
     p.add_argument("--step", type=float, default=1.0)
     p.set_defaults(func=cmd_strips)
+
+    p = sub.add_parser("render", help="videos.json대로 최종 영상을 만든다")
+    p.add_argument("work_dir")
+    p.add_argument("videos")
+    p.add_argument("--out", required=True)
+    p.add_argument("--episode", type=int)
+    p.set_defaults(func=cmd_render)
 
     args = ap.parse_args(argv)
     args.func(args)

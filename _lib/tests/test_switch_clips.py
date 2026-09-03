@@ -92,12 +92,35 @@ class ProbeTest(unittest.TestCase):
         sessions = sc.group_sessions(sc.probe_dir(self.raw))
         single = sessions[1]
         p = sc.render_strip(self.raw, single, self.td / "strip.jpg", step=1.0, width=100)
-        im = Image.open(p)
-        self.assertIn(im.width, {sc.STRIP_LABEL_W + 3 * 100, sc.STRIP_LABEL_W + 4 * 100})
+        with Image.open(p) as im:
+            width1 = im.width
+            height1 = im.height
+        self.assertIn(width1, {sc.STRIP_LABEL_W + 3 * 100, sc.STRIP_LABEL_W + 4 * 100})
         joined = sessions[0]
         p2 = sc.render_strip(self.raw, joined, self.td / "strip2.jpg", step=1.0, width=100)
-        im2 = Image.open(p2)
-        self.assertGreater(im2.height, im.height)
+        with Image.open(p2) as im2:
+            height2 = im2.height
+        self.assertGreater(height2, height1)
+
+    def test_render_copy_keeps_total_and_trim_cuts(self):
+        sessions = sc.group_sessions(sc.probe_dir(self.raw))
+        by_id = {s["id"]: s for s in sessions}
+        out = self.td / "out"
+        out.mkdir()
+        r = sc.render_entry({"episode": 1, "slot": "v01", "title": "테스트 병합",
+                             "sessions": ["S01"], "in": 0, "out": None}, by_id, self.raw, out)
+        self.assertEqual(r["mode"], "copy")
+        self.assertEqual(r["file"], "01_v01_테스트 병합.mp4")
+        self.assertTrue((out / r["file"]).exists())
+        self.assertAlmostEqual(r["duration"], 6.0, delta=0.3)
+
+        r2 = sc.render_entry({"episode": 1, "slot": "v02", "title": "앞 컷",
+                              "sessions": ["S01"], "in": 1.0, "out": 4.0}, by_id, self.raw, out)
+        self.assertEqual(r2["mode"], "reencode")
+        self.assertAlmostEqual(r2["duration"], 3.0, delta=0.3)
+
+    def test_safe_name_strips_path_characters(self):
+        self.assertEqual(sc.safe_name('젤다: "시작"/대지?'), "젤다 시작 대지")
 
 
 if __name__ == "__main__":
