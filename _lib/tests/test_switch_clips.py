@@ -87,6 +87,18 @@ class ProbeTest(unittest.TestCase):
         self.assertAlmostEqual(clips[0]["dur"], 3.0, delta=0.2)
         self.assertEqual(len(sc.group_sessions(clips)), 2)
 
+    def test_strip_has_one_column_per_second(self):
+        from PIL import Image
+        sessions = sc.group_sessions(sc.probe_dir(self.raw))
+        single = sessions[1]
+        p = sc.render_strip(self.raw, single, self.td / "strip.jpg", step=1.0, width=100)
+        im = Image.open(p)
+        self.assertIn(im.width, {sc.STRIP_LABEL_W + 3 * 100, sc.STRIP_LABEL_W + 4 * 100})
+        joined = sessions[0]
+        p2 = sc.render_strip(self.raw, joined, self.td / "strip2.jpg", step=1.0, width=100)
+        im2 = Image.open(p2)
+        self.assertGreater(im2.height, im.height)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

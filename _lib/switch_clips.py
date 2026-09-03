@@ -26,6 +26,8 @@ FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
 STAMP_RE = re.compile(r"(\d{14})")
 VIDEO_EXTS = {".mp4", ".mov"}
+STRIP_LABEL_W = 40
+STRIP_ROW_PAD = 20
 
 
 def parse_stamp(name: str) -> dt.datetime:
@@ -108,6 +110,58 @@ def cmd_scan(args) -> None:
     print(f"클립 {len(clips)}개 -> 촬영 {len(sessions)}건 -> {out / 'sessions.json'}")
 
 
+def extract_frames(path: pathlib.Path, step: float, width: int, tmp: pathlib.Path) -> list[pathlib.Path]:
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-i", str(path),
+                    "-vf", f"fps={1.0 / step:g},scale={width}:-2", str(tmp / "f%04d.jpg")],
+                   check=True)
+    return sorted(tmp.glob("f*.jpg"))
+
+
+def render_strip(raw_dir: pathlib.Path, session: dict, out_path: pathlib.Path,
+                 step: float = 1.0, width: int = 320) -> pathlib.Path:
+    """촬영 건의 클립마다 한 줄씩, step초 간격 프레임을 가로로 늘어놓은 띠를 만든다.
+
+    프레임 위의 숫자는 촬영 건 기준 누적 초다. videos.json의 in/out은 이 숫자로 적는다.
+    """
+    from PIL import Image, ImageDraw
+    rows = []
+    offset = 0.0
+    with tempfile.TemporaryDirectory() as td:
+        for k, name in enumerate(session["files"]):
+            sub = pathlib.Path(td) / f"c{k}"
+            sub.mkdir()
+            frames = [Image.open(f).copy() for f in extract_frames(raw_dir / name, step, width, sub)]
+            rows.append((offset, frames))
+            offset += session["durs"][k]
+    h = max(im.height for _, fr in rows for im in fr)
+    ncols = max(len(fr) for _, fr in rows)
+    sheet = Image.new("RGB", (STRIP_LABEL_W + ncols * width, len(rows) * (h + STRIP_ROW_PAD)), (20, 20, 20))
+    draw = ImageDraw.Draw(sheet)
+    for r, (offset, frames) in enumerate(rows):
+        y = r * (h + STRIP_ROW_PAD)
+        draw.text((2, y + 2), f"c{r + 1}", fill=(255, 255, 255))
+        for k, im in enumerate(frames):
+            x = STRIP_LABEL_W + k * width
+            sheet.paste(im, (x, y + STRIP_ROW_PAD - 2))
+            draw.text((x + 2, y + 2), f"{offset + k * step:.0f}s", fill=(255, 255, 0))
+    sheet.save(out_path, quality=80)
+    return out_path
+
+
+def cmd_strips(args) -> None:
+    work = pathlib.Path(args.work_dir).expanduser().resolve()
+    data = read_json(work / "sessions.json")
+    raw_dir = pathlib.Path(data["raw_dir"])
+    out = work / "strips"
+    out.mkdir(exist_ok=True)
+    wanted = set(args.session or [])
+    for s in data["sessions"]:
+        if wanted and s["id"] not in wanted:
+            continue
+        p = render_strip(raw_dir, s, out / f"{s['id']}.jpg", step=args.step)
+        print(f"{s['id']} -> {p}")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -117,6 +171,12 @@ def main(argv=None) -> int:
     p.add_argument("--out", required=True)
     p.add_argument("--gap", type=float, default=3.0)
     p.set_defaults(func=cmd_scan)
+
+    p = sub.add_parser("strips", help="촬영 건마다 프레임 띠를 만든다")
+    p.add_argument("work_dir")
+    p.add_argument("--session", action="append")
+    p.add_argument("--step", type=float, default=1.0)
+    p.set_defaults(func=cmd_strips)
 
     args = ap.parse_args(argv)
     args.func(args)
