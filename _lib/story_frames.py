@@ -19,6 +19,7 @@ images/와 script.md 뼈대, meta.json을 만든다(render). check는 캡션이 
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import pathlib
 import re
@@ -232,6 +233,137 @@ def cmd_sheet(args) -> None:
         print(p)
 
 
+def make_strip(paths: list[str], band: str) -> Image.Image:
+    """여러 장의 같은 영역을 잘라 세로로 잇고 사이에 SEP px 검은 선을 둔다."""
+    box = BANDS[band]
+    w, h = box[2] - box[0], box[3] - box[1]
+    out = Image.new("RGB", (w, h * len(paths) + SEP * (len(paths) - 1)), (0, 0, 0))
+    for i, p in enumerate(paths):
+        with Image.open(p) as src:
+            out.paste(src.convert("RGB").crop(box), (0, i * (h + SEP)))
+    return out
+
+
+def crop_preset(path: str, preset: str) -> Image.Image:
+    with Image.open(path) as src:
+        return src.convert("RGB").crop(PRESETS[preset]).copy()
+
+
+def render(plan: dict, out_dir: pathlib.Path, title: str, category: str,
+           category_no: int | None, date: str, watermark: bool = True) -> dict:
+    images = out_dir / "images"
+    images.mkdir(parents=True, exist_ok=True)
+    lines = ["---", f'title: "{title}"', f"category: {category}", f"date: {date}", "---", "",
+             f"# {title}", "", INTRO_MARK, ""]
+    n = 0
+    count = 0
+    videos = []
+    for si, sec in enumerate(plan["sections"]):
+        if si > 0:
+            lines += ["---", ""]
+        lines += [f"## {sec['title']}", ""]
+        for it in sec["items"]:
+            t = it["type"]
+            if t == "skip":
+                continue
+            if t == "heading":
+                lines += [f"### {it['title']}", ""]
+                continue
+            if t == "video":
+                if not (images / it["file"]).exists():
+                    print(f"[경고] 영상 파일이 아직 없습니다: {images / it['file']}")
+                lines += [f"[영상 자리 : images/{it['file']}]", "", CAPTION_MARK, ""]
+                videos.append({"file": it["file"], "title": it.get("title") or it["file"]})
+                continue
+            n += 1
+            if t == "photo":
+                dst = images / f"{n:03d}.jpg"
+                shutil.copyfile(it["src"], dst)
+                count += 1
+                lines += [f"![](images/{dst.name})", "", CAPTION_MARK, ""]
+            elif t == "crop":
+                dst = images / f"{n:03d}_crop.jpg"
+                crop_preset(it["src"], it["preset"]).save(dst, quality=92)
+                count += 1
+                lines += [f"![](images/{dst.name})", "", CAPTION_MARK, ""]
+            elif t == "strip":
+                lead = images / f"{n:03d}.jpg"
+                shutil.copyfile(it["lead"], lead)
+                count += 1
+                strip = images / f"{n:03d}_strip.jpg"
+                make_strip(it["src"], it["band"]).save(strip, quality=92)
+                count += 1
+                lines += [f"![](images/{lead.name})", "", f"![](images/{strip.name})", "", CAPTION_MARK, ""]
+            else:
+                raise ValueError(f"모르는 항목 유형입니다: {t}")
+    if watermark:
+        for p in sorted(images.glob("*.jpg")):
+            add_watermark(str(p))
+    (out_dir / "script.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    meta = {
+        "title_candidates": [title],
+        "category": category,
+        "category_no": category_no,
+        "hashtags": [],
+        "images": {"count": count, "source_folder": str(images.resolve())},
+        "videos_folder": str(images.resolve()),
+        "videos": videos,
+    }
+    write_json(out_dir / "meta.json", meta)
+    return meta
+
+
+IMG_LINE = re.compile(r"^!\[[^\]]*\]\([^)]+\)\s*$")
+VIDEO_LINE = re.compile(r"^\[영상 자리\s*:")
+STRUCT_LINE = re.compile(r"^(#{1,6}\s|---\s*$|!\[|\[영상 자리)")
+
+
+def check_captions(md: str) -> list[tuple[int, str]]:
+    """사진이나 영상 자리 뒤에 오는 캡션이 마침표로 끝나는지, 빈 표식이 남았는지 본다."""
+    lines = md.splitlines()
+    problems: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        if line.strip() == INTRO_MARK:
+            problems.append((i + 1, "도입이 비어 있습니다"))
+            continue
+        if not (IMG_LINE.match(line) or VIDEO_LINE.match(line)):
+            continue
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        if j >= len(lines):
+            break
+        nxt = lines[j].strip()
+        if nxt == CAPTION_MARK:
+            problems.append((j + 1, "캡션이 비어 있습니다"))
+            continue
+        if STRUCT_LINE.match(nxt):
+            continue
+        if not nxt.endswith("."):
+            problems.append((j + 1, f"마침표로 끝나지 않습니다: {nxt[-20:]}"))
+    return problems
+
+
+def cmd_render(args) -> None:
+    work = pathlib.Path(args.work_dir).expanduser().resolve()
+    plan = read_json(work / "plan.json")
+    out = pathlib.Path(args.out).expanduser().resolve()
+    date = args.date or dt.date.today().isoformat()
+    meta = render(plan, out, title=args.title, category=args.category,
+                  category_no=args.category_no, date=date, watermark=not args.no_watermark)
+    print(f"사진 {meta['images']['count']}장, 영상 {len(meta['videos'])}개 -> {out}")
+
+
+def cmd_check(args) -> None:
+    md = pathlib.Path(args.script).read_text(encoding="utf-8")
+    problems = check_captions(md)
+    for line_no, msg in problems:
+        print(f"{args.script}:{line_no}  {msg}")
+    print(f"문제 {len(problems)}건")
+    if problems:
+        sys.exit(1)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -246,6 +378,20 @@ def main(argv=None) -> int:
     p = sub.add_parser("sheet", help="plan.json의 콘택트 시트를 만든다")
     p.add_argument("work_dir")
     p.set_defaults(func=cmd_sheet)
+
+    p = sub.add_parser("render", help="plan.json대로 초안 폴더를 만든다")
+    p.add_argument("work_dir")
+    p.add_argument("--out", required=True)
+    p.add_argument("--title", required=True)
+    p.add_argument("--category", default="젤다무쌍 봉인전기")
+    p.add_argument("--category-no", type=int, default=None)
+    p.add_argument("--date", default=None)
+    p.add_argument("--no-watermark", action="store_true")
+    p.set_defaults(func=cmd_render)
+
+    p = sub.add_parser("check", help="script.md의 캡션 마침표와 빈 표식을 검사한다")
+    p.add_argument("script")
+    p.set_defaults(func=cmd_check)
 
     args = ap.parse_args(argv)
     args.func(args)

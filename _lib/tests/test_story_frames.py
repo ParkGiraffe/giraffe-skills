@@ -119,10 +119,92 @@ class PlanTest(unittest.TestCase):
         out.mkdir()
         sheets = sf.render_sheets(plan, out, per_sheet=3, thumb=(160, 90))
         self.assertEqual([p.name for p in sheets], ["sheet_01.jpg", "sheet_02.jpg"])
-        im = Image.open(sheets[0])
-        self.assertEqual(im.size, (300 + 6 * 160, 3 * (90 + 8)))
-        im2 = Image.open(sheets[1])
-        self.assertEqual(im2.height, 1 * (90 + 8))
+        with Image.open(sheets[0]) as im:
+            self.assertEqual(im.size, (300 + 6 * 160, 3 * (90 + 8)))
+        with Image.open(sheets[1]) as im2:
+            self.assertEqual(im2.height, 1 * (90 + 8))
+
+
+class RenderTest(unittest.TestCase):
+    def setUp(self):
+        self.td = pathlib.Path(tempfile.mkdtemp())
+        self.src = self.td / "src"
+        self.src.mkdir()
+        self.a = str(self.src / "a.jpg")
+        self.b = str(self.src / "b.jpg")
+        self.c = str(self.src / "c.jpg")
+        self.d = str(self.src / "d.jpg")
+        with_subtitle(base_frame(0), "여기가 과거라는 것을 확인합니다").save(self.a)
+        with_subtitle(base_frame(0), "봉인 전쟁이라고 부르는 시대입니다").save(self.b)
+        with_subtitle(base_frame(0), "타이틀이 뜨고 이야기가 시작됩니다").save(self.c)
+        base_frame(2).save(self.d)
+        self.plan = {"source": str(self.src), "originals": None, "threshold": 0.10, "sections": [
+            {"title": "시작의 대지로", "items": [
+                {"type": "photo", "src": self.d, "guess": "plain"},
+                {"type": "strip", "lead": self.a, "src": [self.b, self.c], "band": "subtitle", "guess": "subtitle"},
+                {"type": "heading", "title": "하이랄 성"},
+                {"type": "crop", "src": self.d, "preset": "popup"},
+                {"type": "skip", "src": self.d, "guess": "result", "reason": "결과 화면"},
+                {"type": "video", "file": "01_v01_시작의 대지 도착.mp4", "title": "시작의 대지 도착"},
+            ]},
+            {"title": "검술 훈련", "items": [
+                {"type": "photo", "src": self.d, "guess": "plain"},
+            ]},
+        ]}
+
+    def tearDown(self):
+        shutil.rmtree(self.td)
+
+    def test_make_strip_size(self):
+        im = sf.make_strip([self.b, self.c], "subtitle")
+        self.assertEqual(im.size, (1920, 200 * 2 + sf.SEP))
+
+    def test_crop_preset_size(self):
+        self.assertEqual(sf.crop_preset(self.d, "popup").size, (1123, 966))
+
+    def test_render_writes_images_script_and_meta(self):
+        out = self.td / "draft"
+        meta = sf.render(self.plan, out, title="[젤다무쌍 봉인전기] 1. 테스트", category="젤다무쌍 봉인전기",
+                         category_no=None, date="2026-09-03", watermark=False)
+        names = sorted(p.name for p in (out / "images").iterdir())
+        self.assertEqual(names, ["001.jpg", "002.jpg", "002_strip.jpg", "003_crop.jpg", "004.jpg"])
+        with Image.open(out / "images" / "002_strip.jpg") as im:
+            self.assertEqual(im.size, (1920, 404))
+        self.assertEqual(meta["images"]["count"], 5)
+        self.assertEqual(meta["videos"], [{"file": "01_v01_시작의 대지 도착.mp4", "title": "시작의 대지 도착"}])
+        self.assertEqual(meta["videos_folder"], str((out / "images").resolve()))
+        self.assertEqual(meta["title_candidates"], ["[젤다무쌍 봉인전기] 1. 테스트"])
+        md = (out / "script.md").read_text(encoding="utf-8")
+        self.assertIn('title: "[젤다무쌍 봉인전기] 1. 테스트"', md)
+        self.assertIn("# [젤다무쌍 봉인전기] 1. 테스트", md)
+        self.assertIn("## 시작의 대지로", md)
+        self.assertIn("### 하이랄 성", md)
+        self.assertIn("![](images/002.jpg)\n\n![](images/002_strip.jpg)\n\n<!-- 캡션 -->", md)
+        self.assertIn("[영상 자리 : images/01_v01_시작의 대지 도착.mp4]", md)
+        self.assertIn("\n---\n\n## 검술 훈련", md)
+        self.assertEqual(json.loads((out / "meta.json").read_text(encoding="utf-8"))["images"]["count"], 5)
+
+
+class CheckTest(unittest.TestCase):
+    def test_caption_with_period_passes(self):
+        md = "![](images/001.jpg)\n\n라울이 젤다를 찾고 있었다고 말합니다.\n"
+        self.assertEqual(sf.check_captions(md), [])
+
+    def test_caption_without_period_is_reported(self):
+        md = "![](images/001.jpg)\n\n라울이 젤다를 찾고 있었다고 말합니다\n"
+        self.assertEqual([p[0] for p in sf.check_captions(md)], [3])
+
+    def test_empty_caption_mark_is_reported(self):
+        md = "![](images/001.jpg)\n\n<!-- 캡션 -->\n"
+        self.assertEqual(len(sf.check_captions(md)), 1)
+
+    def test_consecutive_images_and_video_slots_are_allowed(self):
+        md = "![](images/001.jpg)\n\n![](images/002.jpg)\n\n[영상 자리 : images/v.mp4]\n\n## 소제목\n\n설명입니다.\n"
+        self.assertEqual(sf.check_captions(md), [])
+
+    def test_intro_mark_is_reported(self):
+        md = "# 제목\n\n<!-- 도입 -->\n\n![](images/001.jpg)\n\n설명입니다.\n"
+        self.assertEqual([p[1] for p in sf.check_captions(md)], ["도입이 비어 있습니다"])
 
 
 if __name__ == "__main__":
