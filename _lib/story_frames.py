@@ -339,8 +339,14 @@ def check_captions(md: str) -> list[tuple[int, str]]:
             continue
         if STRUCT_LINE.match(nxt):
             continue
-        if not nxt.endswith("."):
-            problems.append((j + 1, f"마침표로 끝나지 않습니다: {nxt[-20:]}"))
+        # 빈 줄이나 구조 줄이 나올 때까지 이어지는 줄을 한 문단(캡션)으로 본다
+        k = j
+        while (k + 1 < len(lines) and lines[k + 1].strip()
+               and not STRUCT_LINE.match(lines[k + 1].strip())):
+            k += 1
+        last = lines[k].strip()
+        if not last.endswith("."):
+            problems.append((k + 1, f"마침표로 끝나지 않습니다: {last[-20:]}"))
     return problems
 
 

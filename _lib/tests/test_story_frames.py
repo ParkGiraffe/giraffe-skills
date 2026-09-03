@@ -206,6 +206,14 @@ class CheckTest(unittest.TestCase):
         md = "# 제목\n\n<!-- 도입 -->\n\n![](images/001.jpg)\n\n설명입니다.\n"
         self.assertEqual([p[1] for p in sf.check_captions(md)], ["도입이 비어 있습니다"])
 
+    def test_caption_spanning_two_lines_passes(self):
+        md = "![](images/001.jpg)\n\n라울이 젤다를\n찾고 있었다고 말합니다.\n"
+        self.assertEqual(sf.check_captions(md), [])
+
+    def test_two_line_caption_without_period_reports_last_line(self):
+        md = "![](images/001.jpg)\n\n라울이 젤다를\n찾고 있었다고 말합니다\n"
+        self.assertEqual([p[0] for p in sf.check_captions(md)], [4])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
