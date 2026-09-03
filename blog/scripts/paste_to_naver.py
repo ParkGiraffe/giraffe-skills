@@ -113,9 +113,9 @@ BARRIER_HTML = '<p><br></p>'
 #   '아래'에만 둔다 = 다음 사진/요소 앞에 옴. 사진 바로 뒤에는 여백을 넣지 않음.
 # 빈 줄은 <p><br></p> 빈 단락으로 표현. 인접한 여백은 합산하지 않고 max로 둠.
 BLANK_P = '<p><br></p>'
-SPACE_BEFORE_SESSION = 5
+SPACE_BEFORE_SESSION = 7
 SPACE_BEFORE_SUB = 3
-SPACE_AFTER_TEXT = 4   # 본문 단락(=사진 캡션) 아래 4줄. 사진 바로 뒤엔 안 넣음.
+SPACE_AFTER_TEXT = 8   # 본문 단락(=사진 캡션) 아래 8줄. 사진 바로 뒤엔 안 넣음. (2026-09-03 발행 글 실측: 중앙값 8줄)
 
 
 def heading_html(text: str, level: int = 2) -> str:
