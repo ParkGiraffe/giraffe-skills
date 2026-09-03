@@ -228,6 +228,9 @@ python3 blog/scripts/upload_to_editor.py .claude/blog-corpus/drafts/<드래프�
 2. `story_frames.py sheet <작업 폴더>`: 콘택트 시트를 눈으로 보고 `plan.json`을 고칩니다.
    틀린 묶음을 풀고, 뺄 사진을 `skip`으로, 팝업을 `crop`으로, 영상 자리를 `video`로,
    장면 전환을 `heading`으로 적습니다. 이 단계를 건너뛰지 않습니다.
+2-1. 캡션을 쓰기 전에 `_lib/story_read_sheet.py <작업 폴더>`로 자막 띠를 크게 붙인 판독용 시트를 만듭니다.
+   콘택트 시트 썸네일로는 자막이 안 읽힙니다. 계획 수정은 `_lib/story_plan_edit.py <작업 폴더> <지시.json>`에
+   사진 번호 기준으로 뺄 사진, 소제목, 영상 자리, 크롭을 적어 한 번에 적용합니다.
 3. `story_frames.py render <작업 폴더> --out <초안> --title "<제목>" --category-no N`:
    `images/`, `script.md` 뼈대, `meta.json`. 워터마크까지 들어갑니다.
    초안 폴더에 `script.md`가 이미 있으면 멈추므로 캡션을 쓴 뒤에는 다른 폴더로

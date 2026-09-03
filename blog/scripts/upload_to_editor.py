@@ -28,7 +28,7 @@ draft_dir 요구사항:
 본문을 다 올린 뒤 그 자리를 실제 동영상으로 바꾼다. 동영상은 캐럿 위치에 삽입되므로
 자리 문단을 통째로 선택해 지워 빈 문단에 캐럿을 남긴 뒤 업로더를 부른다.
 """
-import base64, json, re, subprocess, sys, time
+import base64, json, os, re, subprocess, sys, time
 
 REPO = "/Users/bag-yoseb/Desktop/Project/personal/giraffe-skills"
 sys.path.insert(0, f"{REPO}/tistory-to-naver/scripts")
@@ -79,6 +79,9 @@ JS_VIDEO_COUNT = ("String(document.querySelectorAll('.se-component.se-video, "
                   ".se-component.se-videoDetail').length)")
 
 
+CURRENT_TAB_ID = None   # open_fresh_tab이 연 탭. upload_video.py에 환경변수로 넘긴다
+
+
 def make_chrome_js(tab_id):
     """지정한 탭에서만 JS를 실행하는 함수를 만든다.
 
@@ -122,6 +125,8 @@ def open_fresh_tab():
           '(count of tabs of window 1)')
     # 이후 M의 모든 JS 호출(style_pass 등)이 이 탭만 보게 못박는다
     M.chrome_js = make_chrome_js(tab_id)
+    global CURRENT_TAB_ID
+    CURRENT_TAB_ID = tab_id
     for _ in range(90):   # 에디터 로딩이 30초를 넘기는 경우가 있어 90초까지 기다린다 (2026-09-03)
         time.sleep(1.0)
         try:
@@ -191,7 +196,8 @@ def place_videos(draft, meta):
         M.key(M.KEY_BACKSPACE); time.sleep(1.0)
 
         before = int(M.chrome_js(JS_VIDEO_COUNT))
-        rc = subprocess.run([sys.executable, f"{REPO}/_lib/upload_video.py", path, title]).returncode
+        rc = subprocess.run([sys.executable, f"{REPO}/_lib/upload_video.py", path, title],
+                            env={**os.environ, "NAVER_TAB_ID": str(CURRENT_TAB_ID)}).returncode
         after = int(M.chrome_js(JS_VIDEO_COUNT))
         if rc != 0 or after <= before:
             print(f"[ABORT] 영상 삽입 실패: {fname}"); sys.exit(6)

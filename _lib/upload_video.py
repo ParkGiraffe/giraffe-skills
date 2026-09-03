@@ -25,7 +25,7 @@
 사용:
   upload_video.py <영상파일> [제목]
 """
-import json, sys, time
+import json, os, sys, time
 
 REPO = "/Users/bag-yoseb/Desktop/Project/personal/giraffe-skills"
 sys.path.insert(0, f"{REPO}/tistory-to-naver/scripts")
@@ -170,6 +170,13 @@ def video_count():
 
 
 def main():
+    # 글쓰기 탭이 여럿이면 migrate.chrome_js는 첫 탭을 잡는다. upload_to_editor가
+    # 넘겨주는 탭 id로 못박는다 (2026-09-03: 두 번째 글에서 1편 탭에 업로더를 연 사고).
+    tab_id = os.environ.get("NAVER_TAB_ID")
+    if tab_id:
+        sys.path.insert(0, f"{REPO}/blog/scripts")
+        from upload_to_editor import make_chrome_js
+        M.chrome_js = make_chrome_js(int(tab_id))
     path = sys.argv[1]
     title = sys.argv[2] if len(sys.argv) > 2 else path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
