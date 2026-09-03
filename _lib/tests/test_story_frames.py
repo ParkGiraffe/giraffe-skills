@@ -113,6 +113,17 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(last["guess"], "plain")
         self.assertNotIn("hand_crop", last)
 
+    def test_render_sheets_one_row_per_item(self):
+        plan = sf.build_plan(self.ep, self.orig, threshold=0.10)
+        out = self.td / "work"
+        out.mkdir()
+        sheets = sf.render_sheets(plan, out, per_sheet=3, thumb=(160, 90))
+        self.assertEqual([p.name for p in sheets], ["sheet_01.jpg", "sheet_02.jpg"])
+        im = Image.open(sheets[0])
+        self.assertEqual(im.size, (300 + 6 * 160, 3 * (90 + 8)))
+        im2 = Image.open(sheets[1])
+        self.assertEqual(im2.height, 1 * (90 + 8))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

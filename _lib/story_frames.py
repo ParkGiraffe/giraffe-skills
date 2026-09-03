@@ -178,6 +178,60 @@ def cmd_scan(args) -> None:
     print(f"사진 {len(list_images(ep))}장 -> 항목 {len(items)}개 {kinds} -> {out / 'plan.json'}")
 
 
+SHEET_LABEL_W = 300
+SHEET_ROW_PAD = 8
+
+
+def item_sources(it: dict) -> list[str]:
+    if it["type"] == "strip":
+        return [it["lead"]] + list(it["src"])
+    if it["type"] in ("video", "heading"):
+        return []
+    return [it["src"]]
+
+
+def render_sheets(plan: dict, out_dir: pathlib.Path, per_sheet: int = 12,
+                  thumb=(320, 180)) -> list[pathlib.Path]:
+    font = load_font(22)
+    rows = []
+    idx = 0
+    for sec in plan["sections"]:
+        for it in sec["items"]:
+            idx += 1
+            label = f"{idx:03d} {it['type']} {it.get('guess', '')}".rstrip()
+            if it.get("hand_crop"):
+                label += " 손크롭"
+            if it["type"] == "video":
+                label += " " + it.get("file", "")
+            if it["type"] == "heading":
+                label += " " + it.get("title", "")
+            rows.append((label, item_sources(it)[:6]))
+    sheets = []
+    tw, th = thumb
+    for n in range(0, len(rows), per_sheet):
+        chunk = rows[n:n + per_sheet]
+        sheet = Image.new("RGB", (SHEET_LABEL_W + 6 * tw, len(chunk) * (th + SHEET_ROW_PAD)), (20, 20, 20))
+        draw = ImageDraw.Draw(sheet)
+        for r, (label, paths) in enumerate(chunk):
+            y = r * (th + SHEET_ROW_PAD)
+            draw.text((4, y + 4), label, fill=(255, 255, 255), font=font)
+            for k, p in enumerate(paths):
+                with Image.open(p) as src:
+                    im = ImageOps.fit(src.convert("RGB"), thumb)
+                    sheet.paste(im, (SHEET_LABEL_W + k * tw, y))
+        out = out_dir / f"sheet_{n // per_sheet + 1:02d}.jpg"
+        sheet.save(out, quality=80)
+        sheets.append(out)
+    return sheets
+
+
+def cmd_sheet(args) -> None:
+    work = pathlib.Path(args.work_dir).expanduser().resolve()
+    plan = read_json(work / "plan.json")
+    for p in render_sheets(plan, work):
+        print(p)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -188,6 +242,10 @@ def main(argv=None) -> int:
     p.add_argument("--originals")
     p.add_argument("--threshold", type=float, default=0.10)
     p.set_defaults(func=cmd_scan)
+
+    p = sub.add_parser("sheet", help="plan.json의 콘택트 시트를 만든다")
+    p.add_argument("work_dir")
+    p.set_defaults(func=cmd_sheet)
 
     args = ap.parse_args(argv)
     args.func(args)
