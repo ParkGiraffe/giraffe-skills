@@ -8,3 +8,6 @@ node_modules/
 
 # migrate_from_url.py가 마이그레이션마다 이미지를 받아두는 스크래치 폴더
 tistory-to-naver/scripts/images/
+
+# superpowers SDD 작업 공간(스크래치)
+.superpowers/
