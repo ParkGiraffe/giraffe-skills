@@ -124,6 +124,69 @@ class PlanTest(unittest.TestCase):
         with Image.open(sheets[1]) as im2:
             self.assertEqual(im2.height, 1 * (90 + 8))
 
+    def test_scan_cli_refuses_to_overwrite_plan_without_force(self):
+        work = self.td / "scanwork"
+        self.assertEqual(sf.main(["scan", str(self.ep), "--out", str(work)]), 0)
+        with self.assertRaises(SystemExit) as cm:
+            sf.main(["scan", str(self.ep), "--out", str(work)])
+        self.assertEqual(cm.exception.code, 2)
+        self.assertEqual(sf.main(["scan", str(self.ep), "--out", str(work), "--force"]), 0)
+
+    def test_render_sheets_splits_long_strip_into_multiple_rows(self):
+        paths = []
+        for i in range(9):
+            p = self.td / f"strip_{i}.jpg"
+            with_subtitle(base_frame(0), f"대사 {i}").save(p)
+            paths.append(str(p))
+        plan = {"sections": [{"title": "긴 연속컷", "items": [
+            {"type": "strip", "lead": paths[0], "src": paths[1:], "band": "subtitle", "guess": "subtitle"},
+        ]}]}
+        out = self.td / "sheetwork"
+        out.mkdir()
+        sheets = sf.render_sheets(plan, out, per_sheet=12, thumb=(160, 90))
+        self.assertEqual(len(sheets), 1)
+        with Image.open(sheets[0]) as im:
+            self.assertEqual(im.height, 2 * (90 + 8))
+
+
+class GroupingTest(unittest.TestCase):
+    """build_plan의 같은 구도 묶기 상한과 드리프트 방지를 확인한다.
+
+    frame_diff(base_frame(0), base_frame(1)) ~= 0.047, (0,2) ~= 0.094, (0,3) ~= 0.141
+    (기본 threshold 0.10 기준 실측, 스크립트로 확인함). base_frame(n)에서 n이 하나씩
+    늘 때마다 R 채널만 40씩 벌어지므로 리드와의 차이가 누적된다.
+    """
+
+    def setUp(self):
+        self.td = pathlib.Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.td)
+
+    def test_strip_length_is_capped_at_max_strip_bands(self):
+        ep = self.td / "01_이어지는 자막"
+        ep.mkdir()
+        for i in range(8):
+            with_subtitle(base_frame(0), f"문장 {i}입니다").save(ep / f"{i:03d}.jpg")
+        plan = sf.build_plan(ep, None, threshold=0.10)
+        items = plan["sections"][0]["items"]
+        self.assertEqual(len(items), 2)
+        self.assertIn([it["type"] for it in items], (["strip", "photo"], ["strip", "strip"]))
+        self.assertEqual(len(items[0]["src"]), sf.MAX_STRIP_BANDS)
+
+    def test_strip_grouping_checks_lead_not_only_previous_frame(self):
+        ep = self.td / "01_구도 드리프트"
+        ep.mkdir()
+        with_subtitle(base_frame(0), "문장 0입니다").save(ep / "001.jpg")
+        with_subtitle(base_frame(1), "문장 1입니다").save(ep / "002.jpg")
+        with_subtitle(base_frame(2), "문장 2입니다").save(ep / "003.jpg")
+        with_subtitle(base_frame(3), "문장 3입니다").save(ep / "004.jpg")
+        plan = sf.build_plan(ep, None, threshold=0.10)
+        items = plan["sections"][0]["items"]
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["type"], "strip")
+        self.assertEqual(len(items[0]["src"]), 2)
+
 
 class RenderTest(unittest.TestCase):
     def setUp(self):
@@ -171,7 +234,8 @@ class RenderTest(unittest.TestCase):
         with Image.open(out / "images" / "002_strip.jpg") as im:
             self.assertEqual(im.size, (1920, 404))
         self.assertEqual(meta["images"]["count"], 5)
-        self.assertEqual(meta["videos"], [{"file": "01_v01_시작의 대지 도착.mp4", "title": "시작의 대지 도착"}])
+        self.assertEqual(meta["videos"],
+                        [{"file": "01_v01_시작의 대지 도착.mp4", "slot": "v01", "title": "시작의 대지 도착"}])
         self.assertEqual(meta["videos_folder"], str((out / "images").resolve()))
         self.assertEqual(meta["title_candidates"], ["[젤다무쌍 봉인전기] 1. 테스트"])
         md = (out / "script.md").read_text(encoding="utf-8")
@@ -183,6 +247,17 @@ class RenderTest(unittest.TestCase):
         self.assertIn("[영상 자리 : images/01_v01_시작의 대지 도착.mp4]", md)
         self.assertIn("\n---\n\n## 검술 훈련", md)
         self.assertEqual(json.loads((out / "meta.json").read_text(encoding="utf-8"))["images"]["count"], 5)
+
+    def test_render_refuses_to_overwrite_existing_draft_without_force(self):
+        out = self.td / "draft2"
+        sf.render(self.plan, out, title="테스트", category="젤다무쌍 봉인전기",
+                 category_no=None, date="2026-09-03", watermark=False)
+        with self.assertRaises(FileExistsError):
+            sf.render(self.plan, out, title="테스트", category="젤다무쌍 봉인전기",
+                     category_no=None, date="2026-09-03", watermark=False)
+        meta = sf.render(self.plan, out, title="다시 씀", category="젤다무쌍 봉인전기",
+                         category_no=None, date="2026-09-03", watermark=False, force=True)
+        self.assertEqual(meta["title_candidates"], ["다시 씀"])
 
 
 class CheckTest(unittest.TestCase):

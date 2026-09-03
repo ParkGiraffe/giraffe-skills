@@ -44,6 +44,7 @@ SEP = 4
 TEXT_RATIO = 0.0015
 RESULT_TEXT_RATIO = 0.008
 STAMP16_RE = re.compile(r"(\d{16})")
+VIDEO_SLOT_RE = re.compile(r"^\d{2}_(v\d{2})_")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 CAPTION_MARK = "<!-- 캡션 -->"
 INTRO_MARK = "<!-- 도입 -->"
@@ -126,10 +127,20 @@ def resolve_source(path: pathlib.Path, originals: pathlib.Path | None) -> tuple[
     return path, False
 
 
+MAX_STRIP_BANDS = 6
+
+
 def build_plan(ep_folder: pathlib.Path, originals: pathlib.Path | None, threshold: float) -> dict:
+    """편 폴더를 훑어 plan.json 데이터를 만든다.
+
+    같은 구도 묶기는 직전 프레임과의 구도 일치, 그리고 묶음을 시작한 첫 프레임(리드)과의
+    구도 일치를 모두 요구해 자막이 이어지는 동안 구도가 서서히 드리프트하는 것을 막는다.
+    한 묶음은 리드를 제외하고 MAX_STRIP_BANDS장까지만 늘어난다.
+    """
     items: list[dict] = []
     prev_img = None
     prev_item = None
+    lead_img = None
     for p in list_images(ep_folder):
         src, restored = resolve_source(p, originals)
         img = Image.open(src).convert("RGB")
@@ -137,10 +148,15 @@ def build_plan(ep_folder: pathlib.Path, originals: pathlib.Path | None, threshol
         rec: dict = {"type": "photo", "src": str(src), "guess": kind}
         if restored:
             rec["hand_crop"] = p.name
+        joins_run = False
+        if kind in BANDS and prev_item is not None and prev_item.get("guess") == kind:
+            cur_count = len(prev_item["src"]) if prev_item["type"] == "strip" else 0
+            joins_run = (prev_img is not None and same_framing(prev_img, img, threshold)
+                         and lead_img is not None and same_framing(lead_img, img, threshold)
+                         and cur_count < MAX_STRIP_BANDS)
         if kind == "result":
             rec = {"type": "skip", "src": str(src), "guess": kind, "reason": "결과 화면"}
-        elif (kind in BANDS and prev_item is not None and prev_item.get("guess") == kind
-              and prev_img is not None and same_framing(prev_img, img, threshold)):
+        elif joins_run:
             if prev_item["type"] == "strip":
                 prev_item["src"].append(str(src))
             else:
@@ -151,6 +167,7 @@ def build_plan(ep_folder: pathlib.Path, originals: pathlib.Path | None, threshol
         items.append(rec)
         prev_item = rec
         prev_img = img
+        lead_img = img
     section_title = re.sub(r"^\d+_", "", ep_folder.name)
     return {"source": str(ep_folder), "originals": str(originals) if originals else None,
             "threshold": threshold,
@@ -170,6 +187,10 @@ def cmd_scan(args) -> None:
     originals = pathlib.Path(args.originals).expanduser().resolve() if args.originals else None
     out = pathlib.Path(args.out).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
+    if (out / "plan.json").exists() and not args.force:
+        print(f"[중단] plan.json이 이미 있습니다: {out / 'plan.json'}. "
+              "손으로 고친 내용을 지키려면 --force 로만 덮어씁니다")
+        sys.exit(2)
     plan = build_plan(ep, originals, args.threshold)
     write_json(out / "plan.json", plan)
     items = plan["sections"][0]["items"]
@@ -206,7 +227,16 @@ def render_sheets(plan: dict, out_dir: pathlib.Path, per_sheet: int = 12,
                 label += " " + it.get("file", "")
             if it["type"] == "heading":
                 label += " " + it.get("title", "")
-            rows.append((label, item_sources(it)[:6]))
+            sources = item_sources(it)
+            if len(sources) > 6:
+                total = len(sources)
+                for ci in range(0, total, 6):
+                    if ci == 0:
+                        rows.append((f"{label} ({total}장)", sources[ci:ci + 6]))
+                    else:
+                        rows.append((f"{idx:03d} 이어서", sources[ci:ci + 6]))
+            else:
+                rows.append((label, sources[:6]))
     sheets = []
     tw, th = thumb
     for n in range(0, len(rows), per_sheet):
@@ -250,7 +280,14 @@ def crop_preset(path: str, preset: str) -> Image.Image:
 
 
 def render(plan: dict, out_dir: pathlib.Path, title: str, category: str,
-           category_no: int | None, date: str, watermark: bool = True) -> dict:
+           category_no: int | None, date: str, watermark: bool = True,
+           force: bool = False) -> dict:
+    if not force:
+        for name in ("script.md", "meta.json"):
+            if (out_dir / name).exists():
+                raise FileExistsError(
+                    f"초안이 이미 있습니다: {out_dir}. "
+                    "캡션을 지키려면 다른 폴더로 내보내거나 --force 로 덮어씁니다")
     images = out_dir / "images"
     images.mkdir(parents=True, exist_ok=True)
     lines = ["---", f'title: "{title}"', f"category: {category}", f"date: {date}", "---", "",
@@ -273,7 +310,11 @@ def render(plan: dict, out_dir: pathlib.Path, title: str, category: str,
                 if not (images / it["file"]).exists():
                     print(f"[경고] 영상 파일이 아직 없습니다: {images / it['file']}")
                 lines += [f"[영상 자리 : images/{it['file']}]", "", CAPTION_MARK, ""]
-                videos.append({"file": it["file"], "title": it.get("title") or it["file"]})
+                slot = it.get("slot")
+                if not slot:
+                    m = VIDEO_SLOT_RE.match(it["file"])
+                    slot = m.group(1) if m else None
+                videos.append({"file": it["file"], "slot": slot, "title": it.get("title") or it["file"]})
                 continue
             n += 1
             if t == "photo":
@@ -356,7 +397,8 @@ def cmd_render(args) -> None:
     out = pathlib.Path(args.out).expanduser().resolve()
     date = args.date or dt.date.today().isoformat()
     meta = render(plan, out, title=args.title, category=args.category,
-                  category_no=args.category_no, date=date, watermark=not args.no_watermark)
+                  category_no=args.category_no, date=date, watermark=not args.no_watermark,
+                  force=args.force)
     print(f"사진 {meta['images']['count']}장, 영상 {len(meta['videos'])}개 -> {out}")
 
 
@@ -379,6 +421,7 @@ def main(argv=None) -> int:
     p.add_argument("--out", required=True)
     p.add_argument("--originals")
     p.add_argument("--threshold", type=float, default=0.10)
+    p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("sheet", help="plan.json의 콘택트 시트를 만든다")
@@ -393,6 +436,7 @@ def main(argv=None) -> int:
     p.add_argument("--category-no", type=int, default=None)
     p.add_argument("--date", default=None)
     p.add_argument("--no-watermark", action="store_true")
+    p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_render)
 
     p = sub.add_parser("check", help="script.md의 캡션 마침표와 빈 표식을 검사한다")

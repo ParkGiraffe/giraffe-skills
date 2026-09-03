@@ -119,6 +119,11 @@ class ProbeTest(unittest.TestCase):
         self.assertEqual(r2["mode"], "reencode")
         self.assertAlmostEqual(r2["duration"], 3.0, delta=0.3)
 
+        r3 = sc.render_entry({"episode": 1, "slot": "v03", "title": "뒤만 남김",
+                              "sessions": ["S01"], "in": 1.0, "out": None}, by_id, self.raw, out)
+        self.assertEqual(r3["mode"], "reencode")
+        self.assertAlmostEqual(r3["duration"], 5.0, delta=0.3)
+
     def test_safe_name_strips_path_characters(self):
         self.assertEqual(sc.safe_name('젤다: "시작"/대지?'), "젤다 시작 대지")
 

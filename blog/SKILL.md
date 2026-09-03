@@ -224,11 +224,14 @@ python3 blog/scripts/upload_to_editor.py .claude/blog-corpus/drafts/<드래프�
 사진 (`_lib/story_frames.py`):
 1. `story_frames.py scan <편 폴더> --out <작업 폴더> --originals <원본 폴더>`: 유형 추정과
    같은 구도 묶기로 `plan.json`. 손 크롭본은 원본으로 되돌립니다.
+   `plan.json`이 이미 있으면 멈추며 `--force`를 줘야 덮어씁니다.
 2. `story_frames.py sheet <작업 폴더>`: 콘택트 시트를 눈으로 보고 `plan.json`을 고칩니다.
    틀린 묶음을 풀고, 뺄 사진을 `skip`으로, 팝업을 `crop`으로, 영상 자리를 `video`로,
    장면 전환을 `heading`으로 적습니다. 이 단계를 건너뛰지 않습니다.
 3. `story_frames.py render <작업 폴더> --out <초안> --title "<제목>" --category-no N`:
    `images/`, `script.md` 뼈대, `meta.json`. 워터마크까지 들어갑니다.
+   초안 폴더에 `script.md`가 이미 있으면 멈추므로 캡션을 쓴 뒤에는 다른 폴더로
+   내보내거나 `--force`를 씁니다.
 4. `script.md`의 `<!-- 도입 -->`과 `<!-- 캡션 -->`을 채운 뒤
    `story_frames.py check script.md`와 `korean-writing/scripts/lint.py script.md`를 통과시킵니다.
 5. 업로드는 평소대로 `blog/scripts/upload_to_editor.py <초안>`입니다. `meta.json`의
