@@ -1,6 +1,6 @@
 ---
 name: tistory-to-naver
-description: Tistory 블로그 글을 네이버 블로그 에디터로 자동 마이그레이션합니다. tistory.com 게시물 URL을 받아 본문·이미지·섹션 헤딩(노란 배경 볼드)·구분선을 보존한 채 네이버 SmartEditor에 순차 페이스트하고, 하단 태그 줄은 `naver-blog-tags` 방식으로 새로 뽑아 붙입니다(기본 동작). 사용 시점: 사용자가 Tistory 게시물 URL을 주면서 "네이버로 옮겨줘", "네이버에 복붙", "이전해줘", "마이그레이션", "tistory를 naver로", `/tistory-to-naver <URL>` 등을 요청할 때.
+description: Tistory 블로그 글을 네이버 블로그 에디터로 자동 마이그레이션합니다. tistory.com 게시물 URL을 받아 본문·이미지·섹션 헤딩(노란 배경 볼드)·구분선을 보존한 채 네이버 SmartEditor에 순차 페이스트하고, 하단 태그 줄은 `naver-blog-tags` 방식으로 새로 뽑아 붙입니다(기본 동작). 사용 시점은 사용자가 Tistory 게시물 URL을 주면서 "네이버로 옮겨줘", "네이버에 복붙", "이전해줘", "마이그레이션", "tistory를 naver로", `/tistory-to-naver <URL>` 등을 요청할 때. 티스토리 카테고리 URL을 주면서 "이 카테고리 전부 옮겨줘", "일괄 이관", "비공개로 전체 발행" 같이 여러 편을 한 번에 옮겨 달라고 할 때도 이 스킬을 쓴다.
 ---
 
 # tistory-to-naver — Tistory → 네이버 블로그 자동 이전
@@ -171,10 +171,16 @@ GIF는 프레임이 깨지므로 건너뛴다. 끄려면 `WATERMARK=0` 환경변
 (standing 안전규칙: 무인 네이버 업로드 금지·포커스 검증 필수, 2026-06-16 사고 교훈).
 
 ```bash
-# migrate.py로 본문을 붙인 뒤, 별도 단계로 카테고리 선택 + 공개 발행
-python3 _lib/publish_with_category.py <categoryTestId> "<카테고리명>"
-# 예: python3 _lib/publish_with_category.py 142 "GoodWishes 제작기"
+# migrate 로 본문을 붙인 뒤, 별도 단계로 카테고리 선택 + 발행
+python3 _lib/publish_with_category.py <categoryNo> "<카테고리명>"
+python3 _lib/publish_with_category.py <categoryNo> "<카테고리명>" --private   # 비공개
+# 예: python3 _lib/publish_with_category.py 142 "GoodWishes 개발실"
+#     python3 _lib/publish_with_category.py 177 "로스트아크" --private
 ```
+
+`--private` 는 공개 설정을 비공개로 바꾼 뒤 발행한다. **비공개가 실제로 선택된 것을
+확인하고 나서만 발행 버튼을 누른다.** 확인 없이 누르면 전체공개로 나가고, 발행 뒤에
+되돌려도 이미 노출된 뒤다. 확인에 실패하면 발행하지 않고 exit 2 로 멈춘다.
 
 **2번째 인자(기대 카테고리명)를 반드시 넘긴다.** 생략하면 `"제작기"`가 기본값으로 들어가서
 (`publish_with_category.py:33`), 제작기 계열이 아닌 카테고리에서는 발행 직전 검증이 실패하고
@@ -186,13 +192,33 @@ exit 2로 멈춘다. 1번째 인자를 생략하면 `142`가 기본값이다.
 - DOM 셀렉터(2026-06-23 실측): 발행레이어 `button.publish_btn__`, 카테고리 셀렉트박스
   `.selectbox_button__jb1Dt`(aria-expanded로 열림 판단), 항목 `[data-testid=categoryItemText_<N>]`
   → 클릭은 `el.closest("label")`, 최종발행 `[class*=confirm_btn__]`.
+- **공개 설정 셀렉터(2026-09-04 실측)**: `label.radio_label__mB6ia` 4개(전체공개/이웃공개/
+  서로이웃공개/비공개). 라벨을 click 하면 선택된다. **선택 여부 판정이 함정이다.** input 과
+  label 이 부모 자식이 아니라 **형제**라서, `label.closest("input")` 도
+  `label.querySelector("input")` 도 null 을 돌려준다. `label.getAttribute("for")` 로 id 를
+  따라가야 `checked` 가 읽힌다.
+  - 비공개 `#open_private` = `openType_0`, 전체공개 `#open_public` = `openType_2`,
+    이웃공개 `#open_neighbor` = `openType_1`, 서로이웃공개 `#open_both_neighbor` = `openType_3`
+  - 발행 시각은 `#radio_time1`(현재) / `#radio_time2`(예약)
+  - 셀렉터가 또 바뀌면 `publish_with_category.py <id> "<명>" --dump-open` 으로 덤프해 실측한다.
 - **함정**: osascript 콜마다 창을 앞으로 올리면 floating 레이어가 blur로 닫힘 →
   열기·폴링·선택·확정을 한 IIFE setTimeout 체인으로 하고 결과를 `window.__pr` 전역에 적어 폴링.
   발행 성공 신호 = postwrite 탭이 사라짐(리다이렉트).
-- 카테고리 testid는 `python3 tistory-to-naver/scripts/dump_categories.py`로 덤프하거나,
-  셀렉트박스를 열어 `data-testid^=categoryItem`를 직접 확인.
-  관측값: GoodWishes 제작기=142, Marpia 제작기=143, Pokedex-ai 개발기=144, 젤다 왕눈=132,
-  JavaScript 강의실=147.
+- **카테고리 ID 는 에디터를 안 열고도 덤프된다 (2026-09-04).** `dump_categories.py` 는
+  postwrite 탭이 있어야 하지만, 공개 API 한 방이면 끝난다. 여기 나오는 `categoryNo` 가
+  그대로 `categoryItemText_<N>` 의 N 이다. 부모 자식(`parentCategoryNo`)과 글 수(`postCnt`)도
+  같이 나오고, **`postCnt` 는 공개 글만 세므로 비공개 발행 검증에 그대로 쓸 수 있다**
+  (비공개로 나갔으면 0 이 유지된다).
+
+  ```bash
+  curl -s -A "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)" \
+    -H "Referer: https://m.blog.naver.com/op5321" \
+    "https://m.blog.naver.com/api/blogs/op5321/category-list"
+  ```
+
+  관측값: 로스트아크=177, 호그와트 레거시=175, 붉은사막=116, 젤다무쌍 봉인전기=176,
+  젤다 왕눈=132, GoodWishes 개발실=142(2026-09 기준 "제작기"에서 개명),
+  Pokedex-ai 개발실=144, JavaScript 강의실=147, 포챔스=118.
 
 ## 카테고리 전체 일괄 마이그레이션 (`migrate_category.py`)
 
@@ -200,24 +226,78 @@ exit 2로 멈춘다. 1번째 인자를 생략하면 `142`가 기본값이다.
 
 ```bash
 python3 tistory-to-naver/scripts/migrate_category.py '<CATEGORY_URL>' [옵션]
-  --publish <testid>  편마다 카테고리 지정+발행까지 (opt-in; 생략 시 초안만, 첫 편에서 멈춤)
-  --grep <regex>      제목 필터 (예: '제작기')
-  --start <N>         앞 N편 건너뛰기 (배치 재개용)
-  --limit <N>         최대 N편
-  --reverse           최신순 (기본 과거순)
-  --dry-run           대상 목록만 출력
+  --manifest <json>     편별 제목·태그와 대상 목록 (아래 참고. 배치의 기본값으로 쓴다)
+  --publish <categoryNo>  편마다 카테고리 지정+발행까지 (opt-in; 생략 시 초안만, 첫 편에서 멈춤)
+  --publish-name "<명>"   발행 전 검증에 쓸 카테고리명. --publish 쓰면 항상 같이 넘긴다
+  --private             비공개로 발행
+  --grep <regex>        제목 필터 (예: '제작기')
+  --start <N>           앞 N편 건너뛰기 (배치 재개용)
+  --limit <N>           최대 N편
+  --reverse             최신순 (기본 과거순)
+  --dry-run             대상 목록만 출력
 ```
 
-동작: 카테고리 페이지네이션을 훑어 `/숫자` 링크+제목 수집 → 제목의 시리즈 번호로 정렬 →
-편마다 `scripts/migrate.py`(+`--publish` 시 `_lib/publish_with_category.py`) 순차 실행. 실패 시 중단.
+동작: 편마다 `scripts/migrate_fresh_tab.py`(+`--publish` 시 `_lib/publish_with_category.py`)를
+순차 실행한다. 실패하면 그 편에서 중단하므로 `--start N`으로 재개한다.
 
-- **`--publish` 없으면 첫 편만 붙고 멈춤** (migrate.py가 비어있지 않은 에디터에서 ABORT하므로).
-  전체 배치를 무인으로 돌리려면 `--publish <testid>` 필수.
-- **반드시 `--dry-run` 먼저**: 카테고리에 백링크 정리본(`naver-to-tistory-backlink` 산출물)이
-  섞여 있으면 시리즈 번호가 중복돼 보인다. 목록 확인 후 `--grep`/`--start`로 거를 것.
-- 실증: 2026-06-23 GoodWishes 제작기 13~19 7편을 `migrate.py + publish_with_category.py 142`
-  순차 루프로 무사 발행(카테고리 전부 정확히 지정). 당시엔 두 스크립트가 외부 리포에 있었고,
-  2026-07-30 이 리포로 흡수하며 경로만 바뀌었다.
+### 매니페스트를 쓴다 (카테고리 탐색 모드 금지)
+
+`--manifest`는 `[{id, title, tags, core_tags}, ...]` 형식 JSON이고, 주어지면 **대상 목록과
+순서를 이 파일이 정한다**(카테고리 페이지 탐색을 건너뛴다). 편마다 `--title`/`--tags`/
+`--core-tags`가 자동으로 넘어가므로, 제목·태그를 미리 다 확정해 두면 배치가 무인으로 돈다.
+
+```bash
+# 매니페스트 (편별 제목·태그를 미리 확정해 둔다)
+cat manifest.json
+# [
+#   {"id": 460, "title": "[로스트아크] 1. 자기소개 시간 : 카제로스, 박기린퍼, 건슬링어",
+#    "tags": "로스트아크건슬링어 건슬링어커마 ... 로아일기",
+#    "core_tags": "로스트아크건슬링어 건슬링어커마 ... 로스트아크공략"},
+#   ...
+# ]
+
+# 목록부터 확인
+python3 tistory-to-naver/scripts/migrate_category.py '<CATEGORY_URL>' \
+  --manifest manifest.json --dry-run
+
+# 첫 편만 시험 운행 (셀렉터 실측 겸)
+python3 tistory-to-naver/scripts/migrate_category.py '<CATEGORY_URL>' \
+  --manifest manifest.json --limit 1 \
+  --publish 177 --publish-name "로스트아크" --private
+
+# 나머지
+python3 tistory-to-naver/scripts/migrate_category.py '<CATEGORY_URL>' \
+  --manifest manifest.json --start 1 \
+  --publish 177 --publish-name "로스트아크" --private
+```
+
+**첫 편만 먼저 돌린다.** 발행 레이어 셀렉터가 바뀌었으면 1편에서 exit 2 로 멈추므로,
+19편을 다 붙이고 나서 발견하는 사태를 막는다. 실제로 2026-09-04 배치가 1편에서 걸렸다.
+
+**탐색 모드를 쓰면 안 되는 이유**: 카테고리 페이지의 `<a href="/숫자">`를 전부 긁는데
+**사이드바 최신글 위젯 링크까지 같이 잡힌다.** 로스트아크 실측(2026-09-04)에서 36건이
+잡혔고 그중 12건이 다른 카테고리 글(명조, 붉은사막, 포켓몬)이었다. 글의 진짜 소속은 본문
+HTML의 `window.T.entryInfo = {"categoryLabel":"..."}` 로 판정한다.
+`<meta property="article:section">` 은 티스토리에 없다.
+
+### 고친 버그 (2026-09-04, 로스트아크 19편 이관 중 실측)
+
+문서대로 `migrate_category.py --publish <testid>` 를 돌렸다가 세 번 죽었다. 전부 고쳤다.
+
+1. **한글 카테고리 URL에서 크래시.** `urlopen` 은 요청 라인을 ascii 로 인코딩하므로
+   `/category/잡동사니 게임일기/로스트아크` 를 그대로 넘기면 `UnicodeEncodeError`.
+   `_encode()` 가 percent-encoding 한다.
+2. **기존 postwrite 탭을 조준했다.** 루프가 `migrate_fresh_tab.py` 가 아니라 `migrate.py` 를
+   직접 불러서, 사용자가 손으로 쓰던 초안을 덮어쓸 수 있었다(2026-08-21 사고와 같은 경로).
+3. **`--publish` 가 카테고리명을 안 넘겼다.** 2번째 인자가 비어 기본값 `"제작기"` 로 검증돼
+   다른 카테고리에서는 발행 직전 exit 2. 이제 `--publish-name` 으로 넘긴다.
+
+### 실측 수치
+
+- 2026-09-04 로스트아크 19편(이미지 396장)을 비공개로 이관. 페이스트 합계 25분,
+  편당 평균 84초(최대 178초 = 사진 58장). 이미지 수가 원본과 편별로 전부 일치했다.
+- 2026-06-23 GoodWishes 제작기 13~19 7편을 순차 루프로 발행(카테고리 전부 정확히 지정).
+- **발행된 탭은 남지 않는다.** 결과 확인은 카테고리 목록 페이지를 새로 열어서 한다.
 
 ## 변환 규칙 (`scripts/migrate_from_url.py:split_content_into_chunks`)
 
@@ -232,6 +312,7 @@ python3 tistory-to-naver/scripts/migrate_category.py '<CATEGORY_URL>' [옵션]
 | `<p>&nbsp;</p>` 빈 줄 | `<p><br></p>` barrier |
 | `<img>` (Tistory CDN URL) | 로컬로 다운로드 후 별도 청크로 분리 → 클립보드에 파일 URL로 올려 페이스트 (네이버가 자동 업로드) |
 | `<pre>` 코드블록 | Pass 1: `[[CODE-n]]` placeholder 본문 단락 + `/tmp/naver_code_blocks.json` 사이드카 → Pass 2(`_lib/inject_code_blocks.py`): native `se-code` 컴포넌트로 치환 |
+| `<figure data-ke-type="video">` 유튜브 임베드 | `영상 : <제목> <a href="https://www.youtube.com/watch?v=...">URL</a>` 본문 단락 (`_video_link_html`) |
 
 핵심 트릭: 본문 청크엔 항상 `font-weight:normal; background-color:transparent;` 를 명시 — 네이버 sanitizer가 이전 헤딩 스타일을 본문 단락에 번지게 하는 버그를 막음.
 
@@ -266,7 +347,13 @@ python3 tistory-to-naver/scripts/migrate_category.py '<CATEGORY_URL>' [옵션]
 
 - macOS 전용 (AppKit·NSPasteboard·osascript 의존)
 - Tistory 외 다른 블로그 플랫폼은 지원 안 함 (셀렉터가 `.tt_article_useless_p_margin`, `.entry-content`, `<article>` 순)
-- 동영상·iframe은 평문화될 가능성 (현재 스크립트 미대응)
+- 동영상은 네이버 영상 컴포넌트가 아니라 **본문 링크**로 나간다. 코드블록과 같은 이유로
+  paste 주입이 안 되기 때문이다. `fetch_post` 는 iframe 만 지우고 `<figure>` 는 남겨서
+  `data-video-url`·`data-video-title` 을 읽는다. 링크 텍스트를 URL 로 두는 것은 href 가
+  떨어져도 주소가 읽히게 하려는 것이고, 앞에 "영상 :" 과 제목을 붙이는 것은 URL 단독
+  붙여넣기 때 뜨는 링크 첨부 다이얼로그를 피하려는 것이다(네이티브 다이얼로그가 뜨면
+  CGEvent 입력을 삼켜 매크로 전체가 조용히 실패한다). 유튜브 외 호스트는 미검증.
+- 유튜브가 아닌 iframe(지도, 코드펜 등)은 여전히 사라진다
 - 코드블록 textarea 는 `maxlength=5000` — 5천 자 초과 코드는 잘림 (분할 필요)
 - Pass 2 는 화면 좌표 기반 실제 클릭을 쓰므로 실행 중 다른 창을 띄우거나 입력하면 오작동
 - 네이버 sanitizer 정책이 바뀌면 본문 스타일 번짐이 재발할 수 있음 — `paste_to_naver.py`의 `BODY_SPAN_STYLE`/`HEADING_SPAN_STYLE`을 같이 갱신할 것
