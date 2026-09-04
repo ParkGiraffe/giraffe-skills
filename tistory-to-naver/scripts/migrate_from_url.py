@@ -111,7 +111,9 @@ def fetch_post(url):
         print("Could not find content container (looked for .tt_article_useless_p_margin, .entry-content).")
         return {'content': None, 'source_url': url, 'published_iso': None, 'tags': []}
 
-    # Cleanup: Remove scripts, ads, iframes
+    # Cleanup: Remove scripts, ads, iframes.
+    # 영상 figure(data-ke-type="video")는 남긴다. iframe만 지워도 data-video-url,
+    # data-video-title 속성이 wrapper에 그대로 남아서 뒤에서 본문 링크로 바꾼다.
     for useless in content_candidate.select('script, iframe, ins, .adsbygoogle, .revenue_unit_wrap, .container_postbtn'):
         useless.decompose()
 
@@ -410,6 +412,26 @@ def _body_html_from_element(element):
     return f'<p>{"".join(parts)}</p>'
 
 
+def _video_link_html(url, title=None):
+    """유튜브 임베드를 본문 링크 단락으로 변환한다.
+
+    네이버 영상 컴포넌트는 코드블록과 같은 이유로 paste 로는 만들 수 없다.
+    sanitizer 가 외부 클립보드 마크업을 전부 본문 컴포넌트로 normalize 하기
+    때문이다. 그래서 원본 영상 주소를 본문에 링크로 남긴다.
+
+    링크 텍스트를 URL 로 두는 것은 paste 단계에서 href 가 떨어져도 주소가 읽히게
+    하려는 것이고, 앞에 '영상 :' 과 제목을 붙이는 것은 URL 만 단독으로 붙여넣을 때
+    뜨는 링크 첨부 다이얼로그를 피하기 위해서다. 다이얼로그가 뜨면 네이티브 창이
+    CGEvent 입력을 삼켜서 매크로 전체가 조용히 실패한다.
+    """
+    u = _html_escape(url)
+    prefix = '영상 : '
+    if title:
+        prefix += _html_escape(title) + ' '
+    return (f'<p><span style="{BODY_SPAN_STYLE}">{prefix}'
+            f'<a href="{u}">{u}</a></span></p>')
+
+
 def _build_footer_html(source_url, published_iso, tags=None, core_tags=None):
     """Build the Tistory-migration footer HTML.
 
@@ -535,6 +557,19 @@ def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=No
                     'code': pre.get_text(),
                 })
                 current_html += _body_html_from_text(f'[[CODE-{len(code_blocks)}]]')
+            continue
+
+        # 동영상: Tistory <figure data-ke-type="video">. iframe 은 fetch 단계에서
+        # 제거되고 wrapper 만 남으므로, 원본 유튜브 주소를 본문 링크로 바꾼다.
+        videos = ([element] if element.get('data-ke-type') == 'video'
+                  else element.select('figure[data-ke-type="video"]'))
+        if videos:
+            for fig in videos:
+                video_url = fig.get('data-video-url')
+                if not video_url:
+                    continue
+                current_html += _video_link_html(
+                    video_url, (fig.get('data-video-title') or '').strip() or None)
             continue
 
         # Images \u2014 split out as separate paste chunks so Naver uploads each

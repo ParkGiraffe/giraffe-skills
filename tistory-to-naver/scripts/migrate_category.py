@@ -28,21 +28,42 @@ otherwise by ascending post id.
 """
 import argparse
 import html
+import json
 import os
 import re
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # <repo>/tistory-to-naver/scripts
 REPO = os.path.dirname(os.path.dirname(HERE))              # <repo>
-MIGRATE = os.path.join(HERE, "migrate.py")
+# 기존 postwrite 탭을 절대 건드리지 않는 새 탭 경로가 디폴트다.
+# migrate.py 를 직접 부르면 '첫 번째' postwrite 탭을 조준해서, 사용자가 손으로
+# 쓰던 초안 위에 덮어쓰는 사고가 난다 (2026-08-21).
+MIGRATE = os.path.join(HERE, "migrate_fresh_tab.py")
 PUBLISH = os.path.join(REPO, "_lib", "publish_with_category.py")
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
 
+def _encode(url):
+    """비ASCII 경로를 percent-encoding 한다.
+
+    티스토리 카테고리 URL 은 '/category/잡동사니 게임일기/로스트아크' 처럼 한글이
+    그대로 들어오는데, urlopen 은 요청 라인을 ascii 로 encode 하므로 그대로 넘기면
+    UnicodeEncodeError 로 죽는다. 이미 인코딩된 %XX 는 다시 인코딩하지 않는다.
+    """
+    parts = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit((
+        parts.scheme, parts.netloc,
+        urllib.parse.quote(parts.path, safe="/%"),
+        urllib.parse.quote(parts.query, safe="=&%"),
+        parts.fragment,
+    ))
+
+
 def fetch(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    req = urllib.request.Request(_encode(url), headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.read().decode("utf-8", "replace")
 
@@ -86,6 +107,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("category_url")
     ap.add_argument("--publish", metavar="TESTID", default=None)
+    ap.add_argument("--publish-name", default=None,
+                    help="발행 전 검증에 쓸 카테고리명. 생략하면 publish_with_category.py "
+                         "기본값('제작기')으로 검증돼서 다른 카테고리에선 멈춘다.")
+    ap.add_argument("--private", action="store_true",
+                    help="비공개로 발행 (--publish 와 함께 쓴다)")
+    ap.add_argument("--manifest", default=None,
+                    help="편별 제목·태그를 담은 JSON. [{id, title, tags, core_tags}, ...] "
+                         "형식이며, 주어지면 대상 목록과 순서를 이 파일이 결정한다.")
     ap.add_argument("--grep", default=None)
     ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--limit", type=int, default=None)
@@ -93,11 +122,23 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
-    rows = discover(a.category_url)
+    manifest = {}
+    if a.manifest:
+        with open(a.manifest, encoding="utf-8") as f:
+            entries = json.load(f)
+        manifest = {int(e["id"]): e for e in entries}
+        rows = [(int(e["id"]), e.get("title", ""),
+                 f"https://arnopark.tistory.com/{int(e['id'])}") for e in entries]
+        print(f"[manifest] {len(rows)}편을 {a.manifest} 에서 읽었습니다 (카테고리 탐색 생략)")
+    else:
+        rows = discover(a.category_url)
     if a.grep:
         rx = re.compile(a.grep)
         rows = [r for r in rows if rx.search(r[1])]
-    rows.sort(key=series_key, reverse=a.reverse)
+    if not manifest:
+        rows.sort(key=series_key, reverse=a.reverse)
+    elif a.reverse:
+        rows.reverse()
     rows = rows[a.start:]
     if a.limit:
         rows = rows[: a.limit]
@@ -115,13 +156,26 @@ def main():
               "with --start to continue, or pass --publish <testid> for the full batch.")
 
     for i, (pid, title, url) in enumerate(rows, 1):
-        print(f"\n########## [{i}/{len(rows)}] MIGRATE {pid} — {title[:50]} ##########")
-        if run([sys.executable, MIGRATE, url]) != 0:
+        print(f"\n########## [{i}/{len(rows)}] MIGRATE {pid} : {title[:50]} ##########")
+        cmd = [sys.executable, MIGRATE, url]
+        entry = manifest.get(pid, {})
+        if entry.get("title"):
+            cmd += ["--title", entry["title"]]
+        if entry.get("tags"):
+            cmd += ["--tags", entry["tags"]]
+        if entry.get("core_tags"):
+            cmd += ["--core-tags", entry["core_tags"]]
+        if run(cmd) != 0:
             print(f"[STOP] migrate failed at {pid}")
             sys.exit(1)
         if a.publish:
             print(f"########## [{i}/{len(rows)}] PUBLISH {pid} (cat {a.publish}) ##########")
-            if run([sys.executable, PUBLISH, a.publish]) != 0:
+            pcmd = [sys.executable, PUBLISH, a.publish]
+            if a.publish_name:
+                pcmd.append(a.publish_name)
+            if a.private:
+                pcmd.append("--private")
+            if run(pcmd) != 0:
                 print(f"[STOP] publish failed at {pid}")
                 sys.exit(2)
         else:
