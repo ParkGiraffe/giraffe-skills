@@ -1,6 +1,6 @@
 ---
 name: notion-to-naver
-description: Notion 페이지(지식창고 문서 등)를 네이버 블로그 "박기린의 기린파크"(op5321)로 전사·업로드한다. notion-fetch로 본문·이미지를 확보하고(S3 서명 URL 5분 만료라 즉시 다운로드), 창작 없이 ~입니다 체로만 변환하는 전사 모드로 script.md를 만든 뒤, blog 스킬의 검증된 파이프라인(md_to_smarteditor.py, paste_to_naver.py, inject_code_blocks.py)으로 SmartEditor에 자동 입력한다. 사용 시점 — 사용자가 Notion 페이지 URL을 주면서 "블로그로 옮겨줘", "네이버로 마이그레이션", "이 글 발행하고 싶어", "/notion-to-naver <URL>" 등을 말할 때 반드시 사용. 하드룰: 이모지 절대 금지, 고유명사 왜곡 금지, 개발 관련 글은 무조건 비공개로 발행, 무인 업로드 금지.
+description: Notion 페이지(지식창고 문서 등)를 네이버 블로그 "박기린의 기린파크"(op5321)로 전사·업로드한다. notion-fetch로 본문·이미지를 확보하고(S3 서명 URL 5분 만료라 즉시 다운로드), 창작 없이 ~입니다 체로만 변환하는 전사 모드로 script.md를 만든 뒤, blog 스킬의 검증된 파이프라인(md_to_smarteditor.py, paste_to_naver.py, inject_code_blocks.py)으로 SmartEditor에 자동 입력한다. 사용 시점 — 사용자가 Notion 페이지 URL을 주면서 "블로그로 옮겨줘", "네이버로 마이그레이션", "이 글 발행하고 싶어", "/notion-to-naver <URL>" 등을 말할 때 반드시 사용. 하드룰은 이모지 절대 금지, 고유명사 왜곡 금지, 개발 관련 글은 무조건 비공개로 발행, 무인 업로드 금지.
 ---
 
 # notion-to-naver — Notion 글을 네이버 기린파크로 전사·업로드

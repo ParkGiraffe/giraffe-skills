@@ -1,6 +1,6 @@
 ---
 name: js-lecture-publish
-description: 박기린(op5321)의 티스토리 JS 강의(arnopark.tistory.com) 글을 노션 'JS 마이그레이션' 체크리스트 순서대로 한 번에 4개씩 네이버 블로그 'JavaScript 강의실' 카테고리에 발행한다. 제목을 "[JS 강의] N. ~"로 통일하고, 발행 완료된 글을 노션 체크리스트에서 체크 표시한다. 기존 tistory-to-naver(scripts/migrate.py)·_lib/publish_with_category.py를 재활용. 사용 시점: 사용자가 "JS 강의 4개 발행", "다음 4개 발행해", "/js-lecture-publish", "JS 마이그레이션 이어서" 등을 말할 때. 무인 네이버 업로드 금지·포커스 검증 필수(2026-06-16 사고 교훈), 이모지 금지.
+description: 박기린(op5321)의 티스토리 JS 강의(arnopark.tistory.com) 글을 노션 'JS 마이그레이션' 체크리스트 순서대로 한 번에 4개씩 네이버 블로그 'JavaScript 강의실' 카테고리에 발행한다. 제목을 "[JS 강의] N. ~"로 통일하고, 발행 완료된 글을 노션 체크리스트에서 체크 표시한다. 기존 tistory-to-naver(scripts/migrate.py)·_lib/publish_with_category.py를 재활용. 사용 시점은 사용자가 "JS 강의 4개 발행", "다음 4개 발행해", "/js-lecture-publish", "JS 마이그레이션 이어서" 등을 말할 때. 무인 네이버 업로드 금지·포커스 검증 필수(2026-06-16 사고 교훈), 이모지 금지.
 ---
 
 # js-lecture-publish — JS 강의 티스토리→네이버 4개씩 발행
