@@ -77,16 +77,13 @@ def chrome_js(js_source, timeout=10):
     return out.stdout.strip()
 
 
-def ensure_postwrite_tab(blog_id):
-    if chrome_js("'ping'") == "NO_TAB":
-        url = POSTWRITE_URL.format(blog_id=blog_id)
-        osa('tell application "Google Chrome" to tell window 1 to make new tab '
-            f'at end of tabs with properties {{URL:"{url}"}}')
-        for _ in range(20):
-            time.sleep(1)
-            if chrome_js("document.querySelector('.se-canvas') ? 'ready' : 'loading'") == "ready":
-                break
-    # raise the window that holds the tab and activate Chrome
+def raise_postwrite_window():
+    """글쓰기 탭을 활성 탭으로 만들고 그 창을 최전면으로 올린 뒤 Chrome을 활성화한다.
+
+    붙여넣기가 실제 키보드 입력(CGEvent Cmd+V)이라 Chrome이 최전면이어야 한다.
+    postwrite 탭이 여러 개면 마지막 매치가 남으므로, migrate_fresh_tab 의
+    '마지막 탭 조준'과 같은 탭을 가리킨다.
+    """
     osa('tell application "Google Chrome"',
         "set wIdx to 0",
         "repeat with w in windows",
@@ -103,6 +100,18 @@ def ensure_postwrite_tab(blog_id):
         "activate",
         "end tell")
     time.sleep(0.8)
+
+
+def ensure_postwrite_tab(blog_id):
+    if chrome_js("'ping'") == "NO_TAB":
+        url = POSTWRITE_URL.format(blog_id=blog_id)
+        osa('tell application "Google Chrome" to tell window 1 to make new tab '
+            f'at end of tabs with properties {{URL:"{url}"}}')
+        for _ in range(20):
+            time.sleep(1)
+            if chrome_js("document.querySelector('.se-canvas') ? 'ready' : 'loading'") == "ready":
+                break
+    raise_postwrite_window()
 
 
 # ----------------------------------------------------------------- real input
@@ -146,6 +155,21 @@ def wait_for_window_focus(retries=6):
         osa('tell application "Google Chrome" to activate')
         time.sleep(1.0)
     return False
+
+
+def refocus(retries=3):
+    """포커스를 잃었으면 되찾는다. 이미 쥐고 있으면 아무것도 하지 않는다.
+
+    2026-09-13 실측: 붙여넣기 도중 다른 창이 앞으로 오면 이후 Cmd+V 가 전부
+    그 창으로 가고, 매크로는 문단 수가 안 늘어나는 것만 보고 실패로 기록한다.
+    복구 시도가 없어서 청크 40개가 연속 실패했다. 그래서 재시도 경로에서
+    포커스를 확인하고 되찾는다. 성공 경로에는 호출하지 않아 비용이 0이다.
+    """
+    for _ in range(retries):
+        if chrome_js("String(document.hasFocus())") == "true":
+            return True
+        raise_postwrite_window()
+    return chrome_js("String(document.hasFocus())") == "true"
 
 
 # ------------------------------------------------------------------ js blocks
@@ -307,10 +331,15 @@ def paste_chunks(chunks):
             return None
 
     failures = []
+    consecutive = 0
     for i, chunk in enumerate(chunks):
         kind = chunk["type"]
         ok = False
         for attempt in (1, 2, 3):
+            if attempt > 1 and not refocus():
+                print(f"\n      [ERROR] chunk {i+1}: Chrome 포커스를 되찾지 못해 중단합니다")
+                failures.append(i + 1)
+                return failures
             before = counts()
             if kind == "html":
                 m.copy_html_to_clipboard(chunk["content"])
@@ -337,8 +366,16 @@ def paste_chunks(chunks):
             print(f"      chunk {i+1}/{len(chunks)} retry {attempt}...")
         print(f"\r      chunk {i+1}/{len(chunks)} {'OK' if ok else 'FAILED'}",
               end="", flush=True)
-        if not ok:
+        if ok:
+            consecutive = 0
+        else:
             failures.append(i + 1)
+            consecutive += 1
+            # 연속 실패는 개별 청크 문제가 아니라 환경이 깨진 것이다.
+            # 남은 청크를 20분간 헛돌리지 말고 즉시 멈춘다.
+            if consecutive >= 3:
+                print(f"\n      [ERROR] 연속 {consecutive}회 실패해서 중단합니다")
+                return failures
     print()
     return failures
 
