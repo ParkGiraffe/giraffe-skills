@@ -6,6 +6,7 @@ import io
 import os
 import pathlib
 import re
+import subprocess
 
 from PIL import Image
 
@@ -113,11 +114,38 @@ def _gps(exif):
         return None, None
 
 
+# QuickTime 태그 우선순위. CreationDate 만 지역시각이고 나머지는 UTC 입니다.
+_VIDEO_TAGS = ("-CreationDate", "-CreateDate", "-MediaCreateDate")
+
+
+def _video_datetime(path):
+    """동영상 촬영시각을 exiftool 로 읽습니다. Pillow 는 동영상을 못 엽니다.
+
+    CreationDate 를 먼저 봅니다. 여기에만 오프셋이 붙은 지역시각이 들어 있고
+    CreateDate 와 MediaCreateDate 는 UTC 라서 자정 근처에서 날짜가 하루 어긋납니다.
+    """
+    try:
+        res = subprocess.run(["exiftool", "-s3", "-T", *_VIDEO_TAGS, str(path)],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    for value in res.stdout.strip().split("\t"):
+        value = value.strip()
+        if value and value != "-" and not value.startswith("0000"):
+            return value
+    return None
+
+
 def read_exif(path):
     """EXIF와 치수를 읽습니다. 못 읽는 값은 None입니다."""
     out = {"dt": None, "make": None, "model": None,
            "width": None, "height": None, "gps_lat": None, "gps_lon": None}
     ext = pathlib.Path(path).suffix.lower()
+    if ext in VIDEO_EXT:
+        out["dt"] = _video_datetime(path)
+        return out
     if ext not in IMAGE_EXT:
         return out
     try:

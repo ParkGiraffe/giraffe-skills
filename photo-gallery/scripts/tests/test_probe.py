@@ -119,6 +119,24 @@ class TestExif(unittest.TestCase):
         ex = probe.read_exif(self.root / "a.jpg")
         self.assertEqual((120, 90), (ex["width"], ex["height"]))
 
+    def test_video_uses_exiftool_creation_date(self):
+        """Pillow 는 동영상을 못 엽니다. exiftool 이 지역시각을 줍니다."""
+        real = probe._video_datetime
+        probe._video_datetime = lambda path: "2021:06:12 00:28:03+09:00"
+        self.addCleanup(lambda: setattr(probe, "_video_datetime", real))
+        helpers.make_tree(self.root, {"v.mov": b"not really a video"})
+        self.assertEqual("2021:06:12 00:28:03+09:00",
+                         probe.read_exif(self.root / "v.mov")["dt"])
+
+    def test_video_without_any_date(self):
+        real = probe._video_datetime
+        probe._video_datetime = lambda path: None
+        self.addCleanup(lambda: setattr(probe, "_video_datetime", real))
+        helpers.make_tree(self.root, {"v.mp4": b"not really a video"})
+        ex = probe.read_exif(self.root / "v.mp4")
+        self.assertIsNone(ex["dt"])
+        self.assertIsNone(ex["width"])
+
 
 class TestClassify(unittest.TestCase):
     def test_samsung_screenshot(self):
