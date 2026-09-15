@@ -65,6 +65,28 @@ class TestSchema(unittest.TestCase):
         self.assertEqual(2, n)
         con.close()
 
+    def test_phash_with_top_bit_set_round_trips(self):
+        """dHash 최상위 비트가 1이면 2^63을 넘어 INTEGER 컬럼에 안 들어갑니다."""
+        con = index.open_db(self.db)
+        con.execute("INSERT INTO photo(sha256, path, bytes, kind, origin, imported_at)"
+                    " VALUES('a','p',1,'사진','/o','t')")
+        top = "ffffffffffffffff"          # 2^64 - 1
+        con.execute("UPDATE photo SET phash=? WHERE sha256='a'", (top,))
+        got = con.execute("SELECT phash FROM photo WHERE sha256='a'").fetchone()[0]
+        self.assertEqual(top, got)
+        self.assertIsInstance(got, str)
+        con.close()
+
+    def test_all_digit_phash_stays_text(self):
+        """숫자로만 이루어진 16진수도 정수로 변환되면 안 됩니다."""
+        con = index.open_db(self.db)
+        con.execute("INSERT INTO photo(sha256, path, bytes, kind, origin, imported_at)"
+                    " VALUES('b','q',1,'사진','/o','t')")
+        con.execute("UPDATE photo SET phash='1234567890123456' WHERE sha256='b'")
+        got = con.execute("SELECT phash FROM photo WHERE sha256='b'").fetchone()[0]
+        self.assertIsInstance(got, str)
+        con.close()
+
     def test_keyword_is_unique_per_photo(self):
         con = index.open_db(self.db)
         con.execute("INSERT INTO photo(sha256, path, bytes, kind, origin, imported_at)"

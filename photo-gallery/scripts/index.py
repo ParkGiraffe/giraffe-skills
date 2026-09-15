@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS photo (
   model       TEXT,
   gps_lat     REAL,
   gps_lon     REAL,
-  phash       INTEGER,
+  phash       TEXT,
   event_id    INTEGER REFERENCES event(id),
   origin      TEXT NOT NULL,
   imported_at TEXT NOT NULL
