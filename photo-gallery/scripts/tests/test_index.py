@@ -65,16 +65,28 @@ class TestSchema(unittest.TestCase):
         self.assertEqual(2, n)
         con.close()
 
-    def test_phash_with_top_bit_set_round_trips(self):
-        """dHash 최상위 비트가 1이면 2^63을 넘어 INTEGER 컬럼에 안 들어갑니다."""
+    def test_phash_column_is_declared_text(self):
+        """컬럼이 INTEGER 면 숫자로만 된 16진수 해시가 정수로 변환됩니다.
+
+        선언 타입을 직접 확인합니다. 값을 넣어 보는 것만으로는 부족한데,
+        16진수 글자가 섞인 값은 컬럼이 INTEGER 여도 문자열로 남기 때문입니다.
+        """
+        con = index.open_db(self.db)
+        types = {row[1]: row[2] for row in con.execute("PRAGMA table_info(photo)")}
+        self.assertEqual("TEXT", types["phash"])
+        con.close()
+
+    def test_raw_64bit_int_cannot_be_stored(self):
+        """지각해시를 정수 그대로 넣으면 안 되는 이유를 못박아 둡니다.
+
+        dHash 는 부호 없는 64비트라 최상위 비트가 1이면 2^63 을 넘습니다.
+        16진수 문자열로 인코딩하는 이유가 이것입니다.
+        """
         con = index.open_db(self.db)
         con.execute("INSERT INTO photo(sha256, path, bytes, kind, origin, imported_at)"
                     " VALUES('a','p',1,'사진','/o','t')")
-        top = "ffffffffffffffff"          # 2^64 - 1
-        con.execute("UPDATE photo SET phash=? WHERE sha256='a'", (top,))
-        got = con.execute("SELECT phash FROM photo WHERE sha256='a'").fetchone()[0]
-        self.assertEqual(top, got)
-        self.assertIsInstance(got, str)
+        with self.assertRaises(OverflowError):
+            con.execute("UPDATE photo SET phash=? WHERE sha256='a'", ((1 << 64) - 1,))
         con.close()
 
     def test_all_digit_phash_stays_text(self):
