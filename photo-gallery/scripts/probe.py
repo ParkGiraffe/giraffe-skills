@@ -14,8 +14,6 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".webp", ".bmp",
 
 # 삼성 스크린샷: Screenshot_20260501_155542_Pokmon GO.jpg
 SS_SAMSUNG = re.compile(r"^Screenshot_\d{8}[-_]\d{6}")
-# 아이폰 스크린샷: IMG_2713.PNG (아이폰은 카메라 사진을 PNG로 저장하지 않습니다)
-SS_IPHONE = re.compile(r"^IMG_\d+\.png$", re.IGNORECASE)
 SS_WORDS = re.compile(r"스크린샷|Screen ?Shot|Screen[ _]Recording|Shipping Screenshot",
                       re.IGNORECASE)
 
@@ -146,16 +144,16 @@ def read_exif(path):
 def classify(basename, exif):
     """사진, 스크린샷, 동영상 중 하나를 돌려줍니다.
 
-    두 번째 조건(EXIF 없는 PNG)은 오탐이 납니다. 웹에서 저장한 그림이나 스캔본도
-    EXIF 없는 PNG입니다. 배치 계획 단계에서 사용자가 검토합니다.
+    마지막 조건(EXIF 기기 정보가 없는 PNG)은 오탐이 납니다. 웹에서 저장한 그림이나
+    스캔본도 EXIF 없는 PNG입니다. 배치 계획 단계에서 사용자가 검토합니다.
     """
     ext = os.path.splitext(basename)[1].lower()
     if ext in VIDEO_EXT:
         return "동영상"
     if SS_SAMSUNG.match(basename) or SS_WORDS.search(basename):
         return "스크린샷"
-    if SS_IPHONE.match(basename) and not exif.get("make"):
-        return "스크린샷"
+    # 아이폰 스크린샷은 IMG_2713.PNG 형태입니다. 아이폰은 카메라 사진을 PNG로
+    # 저장하지 않으므로 EXIF 기기 정보가 없는 PNG 는 스크린샷으로 봅니다.
     if ext == ".png" and not exif.get("make"):
         return "스크린샷"
     return "사진"
