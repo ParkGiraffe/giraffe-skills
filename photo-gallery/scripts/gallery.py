@@ -109,6 +109,41 @@ def cmd_scan(args):
     return 0
 
 
+def cmd_blog(args):
+    import blog as blogmod
+    con = index.open_db(args.db)
+    posts = blogmod.fetch_all(args.blog_id, pages=args.pages)
+    for post in posts:
+        tag, _rest = blogmod.split_tag(post["title"])
+        con.execute("INSERT OR REPLACE INTO blog_post(log_no, title, tag, posted_at)"
+                    " VALUES(?,?,?,?)",
+                    (post["log_no"], post["title"], tag, post["posted_at"]))
+    con.commit()
+    print(f"글 {len(posts)}편 저장")
+
+    done = {r[0] for r in con.execute("SELECT DISTINCT log_no FROM blog_image")}
+    todo = [p for p in posts if p["log_no"] not in done]
+    print(f"이미지 수집 대상 {len(todo)}편")
+    for i, post in enumerate(todo, 1):
+        try:
+            names = blogmod.parse_image_names(
+                blogmod.fetch_post_html(args.blog_id, post["log_no"]))
+        except Exception as exc:
+            print(f"  [{i}/{len(todo)}] {post['log_no']} 실패: {exc}")
+            continue
+        con.executemany(
+            "INSERT OR IGNORE INTO blog_image(log_no, filename, match)"
+            " VALUES(?,?,'none')",
+            [(post["log_no"], n) for n in names])
+        con.commit()
+        if i % 25 == 0:
+            print(f"  [{i}/{len(todo)}] 진행 중")
+    total = con.execute("SELECT COUNT(*) FROM blog_image").fetchone()[0]
+    print(f"발행 이미지 파일명 {total}개")
+    con.close()
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="T7 사진 갤러리 도구")
     ap.add_argument("--db", default=str(DB))
@@ -118,6 +153,11 @@ def main(argv=None):
     p = sub.add_parser("scan", help="파일을 읽어 인덱스에 넣습니다 (읽기 전용)")
     p.add_argument("--root", action="append", help="훑을 폴더. 여러 번 줄 수 있습니다")
     p.set_defaults(func=cmd_scan)
+
+    p = sub.add_parser("blog", help="블로그 글과 발행 이미지 파일명을 인덱스에 넣습니다")
+    p.add_argument("--blog-id", default="op5321")
+    p.add_argument("--pages", type=int, default=30)
+    p.set_defaults(func=cmd_blog)
 
     args = ap.parse_args(argv)
     return args.func(args)
