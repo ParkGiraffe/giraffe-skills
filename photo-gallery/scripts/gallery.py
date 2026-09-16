@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import apply as apply_mod  # noqa: E402
 import index  # noqa: E402
 import naming  # noqa: E402
 import probe  # noqa: E402
@@ -283,6 +284,52 @@ def cmd_plan(args):
     return 1 if problems else 0
 
 
+def _read_plan(path):
+    import csv
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def cmd_apply(args):
+    import placement
+    rows = _read_plan(args.plan)
+    problems = placement.validate(rows)
+    if problems:
+        print(f"계획에 문제 {len(problems)}건이 있어 중단합니다:")
+        for m in problems[:20]:
+            print(f"  {m}")
+        return 1
+    gallery = pathlib.Path(args.gallery)
+    print(f"{len(rows)}개를 {gallery} 로 복사합니다. 원본은 지우지 않습니다.")
+    if not args.yes:
+        if input("진행할까요? (yes 입력): ").strip() != "yes":
+            print("취소했습니다.")
+            return 1
+    journal = apply_mod.run(rows, args.base, gallery, gallery / "_시스템" / "작업기록")
+    rec = __import__("json").loads(journal.read_text(encoding="utf-8"))
+    print(f"복사 {len(rec['항목'])}개, 건너뜀 {rec['건너뜀']}개, 실패 {len(rec['실패'])}개")
+    print(f"작업기록: {journal}")
+    print(f"검증: gallery.py verify --journal {journal}")
+    return 0
+
+
+def cmd_verify(args):
+    problems = apply_mod.verify(args.journal, args.base, args.gallery)
+    if problems:
+        print(f"어긋난 항목 {len(problems)}건:")
+        for m in problems[:30]:
+            print(f"  {m}")
+        return 1
+    print("전부 일치합니다.")
+    return 0
+
+
+def cmd_undo(args):
+    n = apply_mod.undo(args.journal, args.gallery)
+    print(f"{n}개를 되돌렸습니다. 원본은 그대로입니다.")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="T7 사진 갤러리 도구")
     ap.add_argument("--db", default=str(DB))
@@ -318,6 +365,22 @@ def main(argv=None):
     p.add_argument("--threshold", type=int, default=4)
     p.add_argument("--out", default="/tmp/gallery-plan.csv")
     p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("apply", help="계획대로 복사합니다 (원본은 남습니다)")
+    p.add_argument("--plan", default="/tmp/gallery-plan.csv")
+    p.add_argument("--gallery", default=str(GALLERY))
+    p.add_argument("--yes", action="store_true", help="확인 없이 진행합니다")
+    p.set_defaults(func=cmd_apply)
+
+    p = sub.add_parser("verify", help="복사본을 원본과 해시로 대조합니다")
+    p.add_argument("--journal", required=True)
+    p.add_argument("--gallery", default=str(GALLERY))
+    p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("undo", help="작업기록 한 건을 되돌립니다")
+    p.add_argument("--journal", required=True)
+    p.add_argument("--gallery", default=str(GALLERY))
+    p.set_defaults(func=cmd_undo)
 
     args = ap.parse_args(argv)
     return args.func(args)
