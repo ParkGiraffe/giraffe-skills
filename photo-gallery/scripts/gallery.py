@@ -325,8 +325,12 @@ def cmd_verify(args):
 
 
 def cmd_undo(args):
-    n = apply_mod.undo(args.journal, args.gallery)
+    n, kept = apply_mod.undo(args.journal, args.gallery)
     print(f"{n}개를 되돌렸습니다. 원본은 그대로입니다.")
+    if kept:
+        print(f"내용이 달라 남겨 둔 파일 {len(kept)}개입니다. 직접 확인하십시오.")
+        for dst in kept[:10]:
+            print(f"  {dst}")
     return 0
 
 

@@ -13,7 +13,10 @@ FILES = sorted(p for p in HERE.glob("test_*.py"))
 
 failed = []
 for path in FILES:
-    print(f"=== {path.name} ===")
+    # flush 가 없으면 파이썬의 print 버퍼가 자식 프로세스의 출력보다 늦게
+    # 비워져서, 제목이 전부 맨 끝에 몰려 찍힙니다. 어느 파일이 터졌는지
+    # 화면으로 알 수 없게 됩니다.
+    print(f"=== {path.name} ===", flush=True)
     res = subprocess.run([sys.executable, str(path)])
     if res.returncode != 0:
         failed.append(path.name)

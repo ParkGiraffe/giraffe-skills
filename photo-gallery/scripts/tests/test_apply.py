@@ -14,6 +14,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
+import unittest.mock  # noqa: E402
+
 import apply as applymod  # noqa: E402
 import helpers  # noqa: E402
 
@@ -113,7 +115,7 @@ class TestCrashRecovery(unittest.TestCase):
         rec = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual({"사진/a.jpg", "사진/b.jpg"},
                          {i["dst"] for i in rec["항목"]})
-        self.assertEqual(2, applymod.undo(path, self.gallery))
+        self.assertEqual(2, applymod.undo(path, self.gallery)[0])
         self.assertFalse((self.gallery / "사진/a.jpg").exists())
         self.assertFalse((self.gallery / "사진/b.jpg").exists())
 
@@ -178,6 +180,120 @@ class TestCrashRecovery(unittest.TestCase):
         self.assertTrue((self.base / "old/a.jpg").exists())
 
 
+class TestPartialFile(unittest.TestCase):
+    """복사가 끊기면 조각 파일이 남습니다. 남기면 안 됩니다."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.tmp.name)
+        self.gallery = self.base / "갤러리"
+        self.journal = self.base / "작업기록"
+        self.data = helpers.gradient_jpeg(seed=7)
+        helpers.make_tree(self.base, {"old/a.jpg": self.data})
+        self.rows = [{"src": "old/a.jpg", "dst": "사진/a.jpg",
+                      "sha256": "s1", "action": "복사"}]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _half_written(error):
+        """반쯤 쓰다가 죽는 복사를 흉내냅니다."""
+        def fake(src, dst):
+            pathlib.Path(dst).write_bytes("절반만".encode("utf-8"))
+            raise error
+        return fake
+
+    def test_failed_copy_leaves_no_fragment(self):
+        with unittest.mock.patch.object(
+                applymod.shutil, "copy", self._half_written(OSError("디스크 꽉 참"))):
+            applymod.run(self.rows, self.base, self.gallery, self.journal)
+        self.assertFalse((self.gallery / "사진/a.jpg").exists(),
+                         "복사가 실패했는데 조각 파일이 남았습니다")
+
+    def test_rerun_after_a_failed_copy_copies_the_whole_file(self):
+        """조각이 남으면 다음 실행이 완성본으로 착각해 영영 건너뜁니다."""
+        with unittest.mock.patch.object(
+                applymod.shutil, "copy", self._half_written(OSError("디스크 꽉 참"))):
+            applymod.run(self.rows, self.base, self.gallery, self.journal)
+        path = applymod.run(self.rows, self.base, self.gallery, self.journal)
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(0, rec["건너뜀"])
+        self.assertEqual(self.data, (self.gallery / "사진/a.jpg").read_bytes())
+
+    def test_interrupt_during_copy_leaves_no_fragment(self):
+        """Ctrl+C 는 OSError 가 아닙니다. 그래도 조각은 치워야 합니다."""
+        with unittest.mock.patch.object(
+                applymod.shutil, "copy",
+                self._half_written(KeyboardInterrupt("복사 도중 중단"))):
+            with self.assertRaises(KeyboardInterrupt):
+                applymod.run(self.rows, self.base, self.gallery, self.journal)
+        self.assertFalse((self.gallery / "사진/a.jpg").exists(),
+                         "중단됐는데 조각 파일이 남았습니다")
+
+    def test_interrupt_during_copy_still_writes_the_journal(self):
+        rows = [{"src": "old/a.jpg", "dst": "사진/먼저.jpg",
+                 "sha256": "s0", "action": "복사"}] + self.rows
+        real = applymod.shutil.copy
+        calls = []
+
+        def fake(src, dst):
+            calls.append(dst)
+            if len(calls) == 1:
+                return real(src, dst)
+            pathlib.Path(dst).write_bytes("절반만".encode("utf-8"))
+            raise KeyboardInterrupt("복사 도중 중단")
+
+        with unittest.mock.patch.object(applymod.shutil, "copy", fake):
+            with self.assertRaises(KeyboardInterrupt):
+                applymod.run(rows, self.base, self.gallery, self.journal)
+        written = sorted(self.journal.glob("*.json"))
+        self.assertEqual(1, len(written), "중단됐는데 작업기록이 없습니다")
+        rec = json.loads(written[0].read_text(encoding="utf-8"))
+        self.assertEqual(["사진/먼저.jpg"], [i["dst"] for i in rec["항목"]])
+
+
+class TestUndoLeavesForeignFiles(unittest.TestCase):
+    """그 자리에 이미 있던 파일이 우리 복사본이라는 보장은 없습니다."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.tmp.name)
+        self.gallery = self.base / "갤러리"
+        self.journal = self.base / "작업기록"
+        helpers.make_tree(self.base, {"old/a.jpg": helpers.gradient_jpeg(seed=1)})
+        self.rows = [{"src": "old/a.jpg", "dst": "사진/a.jpg",
+                      "sha256": "s1", "action": "복사"}]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_undo_keeps_a_file_the_user_put_there(self):
+        mine = helpers.gradient_jpeg(seed=42)
+        target = self.gallery / "사진/a.jpg"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(mine)
+
+        path = applymod.run(self.rows, self.base, self.gallery, self.journal)
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(1, rec["건너뜀"])
+
+        removed, kept = applymod.undo(path, self.gallery)
+        self.assertEqual(0, removed)
+        self.assertEqual(["사진/a.jpg"], kept)
+        self.assertEqual(mine, target.read_bytes(),
+                         "사용자가 넣어 둔 사진을 지웠습니다")
+
+    def test_undo_removes_a_copy_an_earlier_run_made(self):
+        """앞선 실행이 남긴 복사본은 내용이 같으므로 지워야 합니다."""
+        applymod.run(self.rows, self.base, self.gallery, self.journal)
+        path = applymod.run(self.rows, self.base, self.gallery, self.journal)
+        removed, kept = applymod.undo(path, self.gallery)
+        self.assertEqual(1, removed)
+        self.assertEqual([], kept)
+        self.assertFalse((self.gallery / "사진/a.jpg").exists())
+
+
 class TestVerifyAndUndo(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -205,8 +321,9 @@ class TestVerifyAndUndo(unittest.TestCase):
         self.assertEqual(1, len(applymod.verify(self.path, self.base, self.gallery)))
 
     def test_undo_removes_copies_and_keeps_originals(self):
-        n = applymod.undo(self.path, self.gallery)
+        n, kept = applymod.undo(self.path, self.gallery)
         self.assertEqual(1, n)
+        self.assertEqual([], kept)
         self.assertFalse((self.gallery / "사진/2026/05/a.jpg").exists())
         self.assertTrue((self.base / "old/a.jpg").exists())
 

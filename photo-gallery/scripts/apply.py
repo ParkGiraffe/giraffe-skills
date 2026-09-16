@@ -27,6 +27,19 @@ def _write_journal(path, gallery, base, done, failed, skipped):
         ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def _remove_partial(dst):
+    """복사가 끊겼을 때 남은 조각 파일을 치웁니다.
+
+    조각을 남기면 다음 실행이 dst.exists() 만 보고 완성본으로 여겨
+    "이미있음" 으로 건너뜁니다. 그러면 잘린 사진이 갤러리에 영영 남습니다.
+    """
+    try:
+        if dst.exists():
+            dst.unlink()
+    except OSError:
+        pass
+
+
 def run(rows, base, gallery, journal_dir):
     """복사하고 작업기록 경로를 돌려줍니다.
 
@@ -69,15 +82,19 @@ def run(rows, base, gallery, journal_dir):
                 # 잃는 것은 원본 mtime 뿐인데, 이 프로젝트는 mtime 을 날짜
                 # 출처로 쓰지 않습니다. 촬영시각은 EXIF 와 파일명에서만 옵니다.
                 shutil.copy(src, dst)
-            except OSError as exc:
+            except BaseException as exc:
                 # 반쯤 쓰다 만 파일을 남기면 다음 실행이 완성본으로 착각해
                 # 영영 건너뜁니다.
-                try:
-                    if dst.exists():
-                        dst.unlink()
-                except OSError:
-                    pass
-                failed.append({**row, "이유": str(exc)})
+                #
+                # OSError 만 잡으면 안 됩니다. 복사 도중 Ctrl+C 는 이 함수가
+                # 대비하겠다고 적어 둔 바로 그 경우인데 KeyboardInterrupt 는
+                # OSError 가 아닙니다. 잘린 파일을 치우고 나서 다시 던집니다.
+                _remove_partial(dst)
+                if isinstance(exc, OSError):
+                    failed.append({**row, "이유": str(exc)})
+                else:
+                    _write_journal(path, gallery, base, done, failed, skipped)
+                    raise
             else:
                 done.append(entry)
 
@@ -120,10 +137,31 @@ def _inside(path, root):
         return False
 
 
+def _is_our_copy(dst, src, recorded):
+    """dst 에 있는 파일이 우리가 넣은 그 파일인지 내용으로 확인합니다.
+
+    기록된 해시와 맞거나, 출처 파일과 내용이 같으면 우리 복사본입니다.
+    """
+    try:
+        digest = probe.sha256_of(dst)
+    except OSError:
+        return False
+    if recorded and digest == recorded:
+        return True
+    try:
+        return src.exists() and digest == probe.sha256_of(src)
+    except OSError:
+        return False
+
+
 def undo(journal_path, gallery):
-    """복사본을 지우고 빈 폴더를 정리합니다. 원본은 건드리지 않습니다."""
+    """복사본을 지우고 빈 폴더를 정리합니다. 원본은 건드리지 않습니다.
+
+    지운 수와 남겨 둔 항목 목록을 돌려줍니다.
+    """
     gallery = pathlib.Path(gallery)
     rec = json.loads(pathlib.Path(journal_path).read_text(encoding="utf-8"))
+    base = pathlib.Path(rec.get("기준", ""))
     # 하나라도 지우기 전에 전 항목을 먼저 검사합니다. 중간에 예외를 던지면
     # 앞쪽 수천 개는 이미 지워진 채로 멈춰서, 되돌리기가 반만 된 상태가 됩니다.
     bad = [i["dst"] for i in rec["항목"] if not _inside(gallery / i["dst"], gallery)]
@@ -131,11 +169,20 @@ def undo(journal_path, gallery):
         raise RuntimeError(
             f"갤러리 밖을 가리키는 기록이 {len(bad)}개 있어 아무것도 지우지 않았습니다: {bad[:3]}")
 
+    # "이미있음" 은 이번 실행이 복사한 것이 아니라 그 자리에 이미 있던 파일입니다.
+    # 사용자가 손으로 넣어 둔 사진일 수 있으므로 내용을 확인하고 지웁니다.
+    # 우리가 넣은 복사본은 여기서 확인할 필요가 없습니다. 방금 우리가 썼습니다.
+    kept = [i["dst"] for i in rec["항목"]
+            if i.get("이미있음")
+            and (gallery / i["dst"]).exists()
+            and not _is_our_copy(gallery / i["dst"], base / i["src"], i.get("sha256"))]
+    keep = set(kept)
+
     removed = 0
     folders = set()
     for item in rec["항목"]:
         dst = gallery / item["dst"]
-        if dst.exists():
+        if dst.exists() and item["dst"] not in keep:
             dst.unlink()
             removed += 1
         folders.add(dst.parent)
@@ -147,4 +194,4 @@ def undo(journal_path, gallery):
             except OSError:
                 break
             p = p.parent
-    return removed
+    return removed, kept
