@@ -40,6 +40,20 @@ def _remove_partial(dst):
         pass
 
 
+def _unique_journal(journal_dir, stem):
+    """아직 안 쓰인 작업기록 경로를 고릅니다.
+
+    이름이 초 단위라 같은 초에 두 번 돌리면 앞 기록을 덮어씁니다. 덮어쓴
+    기록으로는 앞 실행이 복사한 파일을 되돌릴 수 없습니다.
+    """
+    path = journal_dir / f"{stem}.json"
+    n = 2
+    while path.exists():
+        path = journal_dir / f"{stem}_{n}.json"
+        n += 1
+    return path
+
+
 def run(rows, base, gallery, journal_dir):
     """복사하고 작업기록 경로를 돌려줍니다.
 
@@ -54,7 +68,7 @@ def run(rows, base, gallery, journal_dir):
     gallery = pathlib.Path(gallery)
     journal_dir = pathlib.Path(journal_dir)
     journal_dir.mkdir(parents=True, exist_ok=True)
-    path = journal_dir / f"{dt.datetime.now():%Y%m%d_%H%M%S}.json"
+    path = _unique_journal(journal_dir, f"{dt.datetime.now():%Y%m%d_%H%M%S}")
 
     done, failed, skipped = [], [], 0
     for row in rows:

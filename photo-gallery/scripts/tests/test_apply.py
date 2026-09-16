@@ -79,6 +79,15 @@ class TestApply(unittest.TestCase):
         rec = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(1, len(rec["실패"]))
 
+    def test_two_runs_in_the_same_second_keep_both_journals(self):
+        """이름이 초 단위라 덮어쓰면 앞 실행을 되돌릴 방법이 사라집니다."""
+        first = applymod.run(self.rows[:1], self.base, self.gallery, self.journal)
+        second = applymod.run(self.rows, self.base, self.gallery, self.journal)
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.exists(), "앞 실행의 작업기록이 덮어써졌습니다")
+        rec = json.loads(first.read_text(encoding="utf-8"))
+        self.assertEqual(["사진/2026/05/x.jpg"], [i["dst"] for i in rec["항목"]])
+
     def test_rerun_skips_already_copied(self):
         applymod.run(self.rows, self.base, self.gallery, self.journal)
         path = applymod.run(self.rows, self.base, self.gallery, self.journal)
