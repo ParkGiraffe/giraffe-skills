@@ -172,5 +172,94 @@ class TestSave(TestDb):
         self.assertEqual(3, n)
 
 
+class TestResave(TestDb):
+    """SKILL.md 가 문서화한 흐름은 event 로 검토하고 --save 로 확정하는 2단계라,
+    이름을 고쳐 다시 저장하는 것이 설계된 사용법입니다."""
+
+    def _one_candidate(self):
+        for i in range(3):
+            self.photo(f"s{i}", f"2026-05-01T14:0{i}:00")
+        self.post("1", "[포켓몬 팝업] 성수 메가페스타 1차 방문기", [f"s{i}" for i in range(3)])
+        self.con.commit()
+        return events.candidates(self.con)[0]
+
+    def _save(self, cand, base):
+        return events.save(self.con, cand,
+                           events.unique_folder(self.con, base, cand["log_no"]))
+
+    def test_saving_twice_does_not_duplicate_the_event(self):
+        cand = self._one_candidate()
+        self._save(cand, "20260501_성수 메가페스타 1차")
+        self._save(cand, "20260501_성수 메가페스타 1차")
+        self.assertEqual(1, self.con.execute(
+            "SELECT COUNT(*) FROM event").fetchone()[0])
+
+    def test_saving_twice_keeps_the_folder_name(self):
+        """자기 이름에 비켜 주면 누를 때마다 _2, _3 이 붙습니다."""
+        cand = self._one_candidate()
+        self._save(cand, "20260501_성수 메가페스타 1차")
+        self._save(cand, "20260501_성수 메가페스타 1차")
+        self.assertEqual([("20260501_성수 메가페스타 1차",)], self.con.execute(
+            "SELECT folder FROM event").fetchall())
+
+    def test_no_event_is_left_without_photos(self):
+        """고아 이벤트는 폴더만 만들어지고 사진이 안 들어갑니다."""
+        cand = self._one_candidate()
+        self._save(cand, "20260501_성수 메가페스타 1차")
+        self._save(cand, "20260501_성수 메가페스타 1차")
+        orphan = self.con.execute(
+            "SELECT COUNT(*) FROM event e WHERE NOT EXISTS"
+            " (SELECT 1 FROM photo p WHERE p.event_id = e.id)").fetchone()[0]
+        self.assertEqual(0, orphan)
+
+    def test_renaming_on_resave_updates_the_same_row(self):
+        cand = self._one_candidate()
+        eid = self._save(cand, "20260501_성수 메가페스타 1차")
+        again = self._save(cand, "20260501_성수 메가페스타")
+        self.assertEqual(eid, again)
+        self.assertEqual([("20260501_성수 메가페스타",)], self.con.execute(
+            "SELECT folder FROM event").fetchall())
+
+    def test_hand_assigned_screenshots_survive_a_resave(self):
+        """사람이 눈으로 보고 붙인 스크린샷은 후보의 사진 목록에 없습니다."""
+        cand = self._one_candidate()
+        eid = self._save(cand, "20260501_성수 메가페스타 1차")
+        self.photo("ss1", "2026-05-01T14:05:00", kind="스크린샷")
+        self.con.commit()
+        events.assign(self.con, eid, ["ss1"])
+        self._save(cand, "20260501_성수 메가페스타 1차")
+        self.assertEqual(eid, self.con.execute(
+            "SELECT event_id FROM photo WHERE sha256='ss1'").fetchone()[0])
+
+    def test_two_posts_with_the_same_name_still_get_distinct_folders(self):
+        """1/2, 2/2 다회차 글은 같은 날 같은 이름을 내놓습니다."""
+        for i in range(3):
+            self.photo(f"a{i}", f"2026-05-30T14:0{i}:00")
+            self.photo(f"b{i}", f"2026-05-30T18:0{i}:00")
+        self.post("1", "[페스티벌] 띵조페스티벌 2026 1/2", [f"a{i}" for i in range(3)])
+        self.post("2", "[페스티벌] 띵조페스티벌 2026 2/2", [f"b{i}" for i in range(3)])
+        self.con.commit()
+        for cand in events.candidates(self.con):
+            self._save(cand, "20260530_띵조페스티벌 2026")
+        folders = sorted(r[0] for r in self.con.execute("SELECT folder FROM event"))
+        self.assertEqual(["20260530_띵조페스티벌 2026",
+                          "20260530_띵조페스티벌 2026_2"], folders)
+
+    def test_two_posts_keep_their_folders_on_a_second_save(self):
+        """두 번째 실행에서 _3, _4 로 밀리면 안 됩니다."""
+        for i in range(3):
+            self.photo(f"a{i}", f"2026-05-30T14:0{i}:00")
+            self.photo(f"b{i}", f"2026-05-30T18:0{i}:00")
+        self.post("1", "[페스티벌] 띵조페스티벌 2026 1/2", [f"a{i}" for i in range(3)])
+        self.post("2", "[페스티벌] 띵조페스티벌 2026 2/2", [f"b{i}" for i in range(3)])
+        self.con.commit()
+        for _ in range(2):
+            for cand in events.candidates(self.con):
+                self._save(cand, "20260530_띵조페스티벌 2026")
+        folders = sorted(r[0] for r in self.con.execute("SELECT folder FROM event"))
+        self.assertEqual(["20260530_띵조페스티벌 2026",
+                          "20260530_띵조페스티벌 2026_2"], folders)
+
+
 if __name__ == "__main__":
     unittest.main()

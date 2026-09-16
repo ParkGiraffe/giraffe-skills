@@ -274,7 +274,9 @@ def cmd_event(args):
               f"창 안 스크린샷 {len(ss)}장")
         print(f"  원제 {c['title'][:70]}")
         if args.save:
-            events.save(con, c, events.unique_folder(con, base))
+            # log_no 를 같이 넘겨야 이 글이 앞서 저장해 둔 이름에 자기가
+            # 비켜 주지 않습니다. 비켜 주면 --save 를 누를 때마다 _2 가 붙습니다.
+            events.save(con, c, events.unique_folder(con, base, c["log_no"]))
         print()
     if dup_names:
         print(f"이름이 겹치는 후보가 {len(dup_names)}건 있습니다. "

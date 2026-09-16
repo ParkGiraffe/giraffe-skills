@@ -71,15 +71,18 @@ def screenshots_in_window(con, start, end):
         (start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds"))).fetchall()
 
 
-def unique_folder(con, folder):
+def unique_folder(con, folder, log_no=None):
     """이미 쓰인 폴더명이면 _2, _3 을 붙입니다.
 
-    event.folder 에 UNIQUE 가 걸려 있고 save 가 INSERT OR REPLACE 를 쓰므로,
-    중복이 오면 REPLACE 가 앞 행을 지우려다 딸린 photo.event_id 때문에
-    FOREIGN KEY constraint failed 로 죽습니다. 1/2, 2/2 다회차 글이 같은 날
-    같은 이름을 내놓아 실제로 부딪힙니다.
+    event.folder 에 UNIQUE 가 걸려 있습니다. 1/2, 2/2 다회차 글이 같은 날 같은
+    이름을 내놓아 실제로 부딪힙니다.
+
+    log_no 를 주면 그 글이 앞서 저장해 둔 이름은 "이미 쓰인 것" 으로 보지
+    않습니다. 자기 이름에 비켜 주면 event --save 를 누를 때마다 _2, _3, _4 가
+    붙습니다. 이 파이프라인은 이름을 고쳐 다시 저장하는 것을 전제로 합니다.
     """
-    taken = {row[0] for row in con.execute("SELECT folder FROM event")}
+    taken = {row[0] for row in con.execute("SELECT folder, log_no FROM event")
+             if log_no is None or row[1] != log_no}
     if folder not in taken:
         return folder
     n = 2
@@ -89,15 +92,36 @@ def unique_folder(con, folder):
 
 
 def save(con, cand, folder):
-    """event 행을 만들고 딸린 사진의 event_id를 채웁니다."""
-    cur = con.execute(
-        "INSERT OR REPLACE INTO event(folder, name, start_at, end_at, log_no)"
-        " VALUES(?,?,?,?,?)",
-        (folder, cand["name"],
-         cand["start"].isoformat(timespec="seconds"),
-         cand["end"].isoformat(timespec="seconds"),
-         cand["log_no"]))
-    eid = cur.lastrowid
+    """event 행을 만들고 딸린 사진의 event_id를 채웁니다.
+
+    같은 글에서 나온 후보는 행을 새로 만들지 않고 갱신합니다. INSERT OR REPLACE
+    를 쓰면 안 됩니다. REPLACE 는 앞 행을 지우고 새 id 로 다시 넣으므로, event
+    --save 를 두 번 누르면 이벤트가 두 배가 되고 사진이 새 행으로 옮겨 붙어
+    앞 행은 사진 없는 고아가 됩니다. 실제 규모로는 고아 48개와 옮겨 붙은 사진
+    1,509장입니다.
+
+    이미 붙어 있던 사진을 떼지 않습니다. 사람이 눈으로 보고 붙인 스크린샷은
+    후보의 사진 목록에 없어서, 떼면 그 판단이 통째로 날아갑니다.
+    """
+    row = None
+    if cand["log_no"] is not None:
+        row = con.execute("SELECT id FROM event WHERE log_no=?",
+                          (cand["log_no"],)).fetchone()
+    if row is None:
+        row = con.execute("SELECT id FROM event WHERE folder=?", (folder,)).fetchone()
+
+    start = cand["start"].isoformat(timespec="seconds")
+    end = cand["end"].isoformat(timespec="seconds")
+    if row is None:
+        cur = con.execute(
+            "INSERT INTO event(folder, name, start_at, end_at, log_no)"
+            " VALUES(?,?,?,?,?)", (folder, cand["name"], start, end, cand["log_no"]))
+        eid = cur.lastrowid
+    else:
+        eid = row[0]
+        con.execute(
+            "UPDATE event SET folder=?, name=?, start_at=?, end_at=?, log_no=?"
+            " WHERE id=?", (folder, cand["name"], start, end, cand["log_no"], eid))
     con.executemany("UPDATE photo SET event_id=? WHERE sha256=?",
                     [(eid, sha) for sha in cand["shas"]])
     con.commit()
