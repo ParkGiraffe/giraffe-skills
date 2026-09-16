@@ -342,6 +342,18 @@ def cmd_keywords(args):
     if args.limit:
         items = items[:args.limit]
 
+    gallery = pathlib.Path(args.gallery)
+    # 하나라도 쓰기 전에 전 항목을 먼저 검사합니다. exiftool 은 원본을 그 자리에서
+    # 고치므로, 갤러리 밖을 가리키는 항목이 하나라도 있으면 원본 사진에 키워드가
+    # 박힙니다. 작업기록은 사람이 고칠 수 있는 평문 JSON 입니다.
+    outside = [i["dst"] for i in items if not apply_mod._inside(gallery / i["dst"], gallery)]
+    if outside:
+        print(f"갤러리 밖을 가리키는 항목이 {len(outside)}개 있어 아무것도 쓰지 않았습니다.")
+        for d in outside[:5]:
+            print(f"  {d}")
+        con.close()
+        return 1
+
     written = empty = failed = 0
     for i, item in enumerate(items, 1):
         words = kw.collect(con, item["sha256"], vocab)
@@ -349,8 +361,7 @@ def cmd_keywords(args):
             empty += 1
             continue
         try:
-            kw.write(pathlib.Path(args.gallery) / item["dst"], words,
-                     kw.hierarchical(words, hier))
+            kw.write(gallery / item["dst"], words, kw.hierarchical(words, hier))
             written += 1
         except RuntimeError as exc:
             failed += 1

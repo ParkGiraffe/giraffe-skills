@@ -137,6 +137,36 @@ class TestCrashRecovery(unittest.TestCase):
         rec = json.loads(written[0].read_text(encoding="utf-8"))
         self.assertEqual(applymod.FLUSH_EVERY, len(rec["항목"]))
 
+    def test_apply_refuses_to_write_outside_the_gallery(self):
+        """나가는 쪽이 아니라 들어오는 쪽에서 막아야 합니다.
+
+        갤러리 밖에 쓰고 나서 undo 가 거부하면, 이미 원본을 덮어쓴 뒤이고
+        정상 항목까지 못 되돌립니다. 계획 CSV 는 사람이 고치라고 만든
+        문서이므로 이 경로는 가정이 아닙니다.
+        """
+        precious = self.base / "old/소중한사진.jpg"
+        precious.write_bytes(helpers.gradient_jpeg(seed=9))
+        before = precious.read_bytes()
+        rows = self.rows + [{"src": "old/a.jpg", "dst": "../old/소중한사진.jpg",
+                             "sha256": "s9", "action": "복사"}]
+        path = applymod.run(rows, self.base, self.gallery, self.journal)
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIn("갤러리 밖을 가리키는 목적지",
+                      [f.get("이유") for f in rec["실패"]])
+        self.assertEqual(before, precious.read_bytes(), "원본이 덮어써졌습니다")
+
+    def test_undo_checks_everything_before_deleting_anything(self):
+        """중간에 예외를 던지면 앞쪽 수천 개는 이미 지워진 채로 멈춥니다."""
+        path = applymod.run(self.rows, self.base, self.gallery, self.journal)
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        rec["항목"].append({"src": "x", "dst": "../탈출.jpg",
+                           "sha256": "s9", "action": "복사"})
+        path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+        with self.assertRaises(RuntimeError):
+            applymod.undo(path, self.gallery)
+        self.assertTrue((self.gallery / "사진/a.jpg").exists(),
+                        "거부하기 전에 이미 지웠습니다")
+
     def test_undo_refuses_a_journal_pointing_outside(self):
         """작업기록은 손으로 고칠 수 있으므로 갤러리 밖을 가리킬 수 있습니다."""
         path = applymod.run(self.rows, self.base, self.gallery, self.journal)

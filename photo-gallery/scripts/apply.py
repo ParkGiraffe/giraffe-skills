@@ -49,7 +49,11 @@ def run(rows, base, gallery, journal_dir):
         dst = gallery / row["dst"]
         entry = {"src": row["src"], "dst": row["dst"],
                  "sha256": row.get("sha256"), "action": row.get("action")}
-        if dst.exists():
+        if not _inside(dst, gallery):
+            # 나가는 쪽에서 막으면 늦습니다. 이미 갤러리 밖에 쓴 뒤라
+            # undo 가 기록 전체를 거부하게 되고, 정상 항목까지 못 되돌립니다.
+            failed.append({**row, "이유": "갤러리 밖을 가리키는 목적지"})
+        elif dst.exists():
             skipped += 1
             done.append({**entry, "이미있음": True})
         elif not src.exists():
@@ -120,12 +124,17 @@ def undo(journal_path, gallery):
     """복사본을 지우고 빈 폴더를 정리합니다. 원본은 건드리지 않습니다."""
     gallery = pathlib.Path(gallery)
     rec = json.loads(pathlib.Path(journal_path).read_text(encoding="utf-8"))
+    # 하나라도 지우기 전에 전 항목을 먼저 검사합니다. 중간에 예외를 던지면
+    # 앞쪽 수천 개는 이미 지워진 채로 멈춰서, 되돌리기가 반만 된 상태가 됩니다.
+    bad = [i["dst"] for i in rec["항목"] if not _inside(gallery / i["dst"], gallery)]
+    if bad:
+        raise RuntimeError(
+            f"갤러리 밖을 가리키는 기록이 {len(bad)}개 있어 아무것도 지우지 않았습니다: {bad[:3]}")
+
     removed = 0
     folders = set()
     for item in rec["항목"]:
         dst = gallery / item["dst"]
-        if not _inside(dst, gallery):
-            raise RuntimeError(f"갤러리 밖을 가리키는 기록이 있습니다: {item['dst']}")
         if dst.exists():
             dst.unlink()
             removed += 1

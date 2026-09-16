@@ -98,12 +98,25 @@ def resolve_collisions(rows):
     return rows
 
 
+def escapes(rel):
+    """갤러리 밖으로 나가는 상대경로인지 봅니다.
+
+    계획 CSV 는 사람이 열어 검토하라고 만든 문서입니다. 손으로 고치다
+    "../" 나 절대경로가 들어가면 갤러리 밖에 파일이 쓰입니다. 나가는 쪽에서
+    막으면 이미 늦습니다. 여기서 막습니다.
+    """
+    p = pathlib.PurePosixPath(str(rel).replace("\\", "/"))
+    return p.is_absolute() or ".." in p.parts
+
+
 def validate(rows):
     """남은 문제 목록입니다. 비어야 적용 단계로 갈 수 있습니다."""
     problems = []
     by_dst = collections.defaultdict(set)
     seen_src = collections.Counter()
     for row in rows:
+        if escapes(row["dst"]):
+            problems.append(f"갤러리 밖을 가리키는 목적지: {row['dst']}")
         by_dst[row["dst"]].add(row["sha256"])
         seen_src[row["src"]] += 1
     for dst, shas in by_dst.items():
