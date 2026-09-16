@@ -330,6 +330,39 @@ def cmd_undo(args):
     return 0
 
 
+def cmd_keywords(args):
+    import json
+    import keywords as kw
+    con = index.open_db(args.db)
+    vocab_path = pathlib.Path(__file__).resolve().parent.parent / "references" / "vocab.md"
+    vocab = kw.load_vocab(vocab_path)
+    hier = kw.load_hierarchy(vocab_path)
+    rec = json.loads(pathlib.Path(args.journal).read_text(encoding="utf-8"))
+    items = [i for i in rec["항목"] if i.get("action") == "복사"]
+    if args.limit:
+        items = items[:args.limit]
+
+    written = empty = failed = 0
+    for i, item in enumerate(items, 1):
+        words = kw.collect(con, item["sha256"], vocab)
+        if not words:
+            empty += 1
+            continue
+        try:
+            kw.write(pathlib.Path(args.gallery) / item["dst"], words,
+                     kw.hierarchical(words, hier))
+            written += 1
+        except RuntimeError as exc:
+            failed += 1
+            if failed <= 5:
+                print(f"  실패 {item['dst']}: {exc}")
+        if i % 500 == 0:
+            print(f"  [{i}/{len(items)}] 진행 중")
+    print(f"키워드 기록 {written}개, 붙일 게 없음 {empty}개, 실패 {failed}개")
+    con.close()
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="T7 사진 갤러리 도구")
     ap.add_argument("--db", default=str(DB))
@@ -381,6 +414,12 @@ def main(argv=None):
     p.add_argument("--journal", required=True)
     p.add_argument("--gallery", default=str(GALLERY))
     p.set_defaults(func=cmd_undo)
+
+    p = sub.add_parser("keywords", help="복사본에 XMP 키워드를 씁니다")
+    p.add_argument("--gallery", default=str(GALLERY))
+    p.add_argument("--journal", required=True)
+    p.add_argument("--limit", type=int, default=0, help="0이면 전부")
+    p.set_defaults(func=cmd_keywords)
 
     args = ap.parse_args(argv)
     return args.func(args)
