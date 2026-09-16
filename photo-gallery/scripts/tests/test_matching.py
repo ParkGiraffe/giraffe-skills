@@ -120,16 +120,18 @@ class TestMatchByHash(unittest.TestCase):
         ).fetchone()
         self.assertEqual(("aaa", "dhash"), row)
 
-    def test_distance_exactly_at_threshold_matches(self):
-        """거리가 정확히 임계값이면 매칭으로 칩니다.
+    def test_undecodable_image_is_counted_not_raised(self):
+        """디코딩 실패는 실패로 세고 넘어가야 합니다.
 
-        경계를 테스트로 박아 둡니다. dist 를 threshold + 1 이 아니라 threshold 로
-        "정리" 하면 이 경우가 조용히 탈락하는데, 그대로면 아무도 모릅니다.
+        가드가 없으면 probe.hamming(None, ...) 이 TypeError 를 내는데 감싸는
+        try 가 없어 실행 전체가 죽습니다. 만 육천 건짜리 작업이 한 장 때문에
+        중단되면 안 됩니다.
         """
-        fh, fb = self._fetchers(self.local_phash ^ 0b111111)   # 거리 6
+        fh, fb = self._fetchers(None)
         got = matching.match_by_hash(self.con, "op5321", threshold=6,
                                      fetch_html=fh, fetch_bytes=fb)
-        self.assertEqual(1, got["맞음"])
+        self.assertEqual(1, got["실패"])
+        self.assertEqual(0, got["맞음"])
 
     def test_distance_one_over_threshold_does_not_match(self):
         """거리가 임계값보다 1 크면 매칭이 아닙니다."""
@@ -145,6 +147,21 @@ class TestMatchByHash(unittest.TestCase):
                                      fetch_html=fh, fetch_bytes=fb)
         self.assertEqual(0, got["맞음"])
         self.assertEqual(1, got["없음"])
+
+    def test_exact_threshold_distance_matches(self):
+        """거리가 정확히 threshold면 매칭입니다. dist 초기값이 threshold+1이라야
+
+        `if d < dist`에서 threshold 자신도 통과합니다. 초기값을 threshold로
+        "정리"하면 이 경계가 조용히 없음으로 바뀝니다.
+        """
+        fh, fb = self._fetchers(self.local_phash ^ 0b111111)   # 거리 정확히 6
+        got = matching.match_by_hash(self.con, "op5321", threshold=6,
+                                     fetch_html=fh, fetch_bytes=fb)
+        self.assertEqual(1, got["맞음"])
+        row = self.con.execute(
+            "SELECT sha256, match FROM blog_image WHERE filename='네이버가_바꾼이름.jpg'"
+        ).fetchone()
+        self.assertEqual(("aaa", "dhash"), row)
 
     def test_already_matched_rows_are_skipped(self):
         self.con.execute("UPDATE blog_image SET sha256='aaa', match='name'")
