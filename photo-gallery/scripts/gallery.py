@@ -42,9 +42,28 @@ def _walk(roots):
                 yield pathlib.Path(dirpath) / fn
 
 
-def scan(con, roots, base):
+COMMIT_EVERY = 500
+
+
+def _under(path, base):
+    try:
+        return pathlib.Path(path).resolve().is_relative_to(base.resolve())
+    except (OSError, ValueError):
+        return False
+
+
+def scan(con, roots, base, commit_every=COMMIT_EVERY):
     """파일을 읽어 인덱스에 넣습니다. 아무것도 옮기거나 고치지 않습니다."""
     base = pathlib.Path(base)
+    # base 밖 root 는 훑기 전에 막습니다. 인덱스는 경로를 base 기준 상대경로로
+    # 담으므로 담을 자리가 아예 없고, 루프 안에서 relative_to 가 ValueError 로
+    # 터지면 아직 커밋하지 않은 수천 건이 통째로 사라집니다.
+    outside = [str(r) for r in roots if not _under(r, base)]
+    if outside:
+        raise ValueError(
+            f"--base({base}) 밖을 가리키는 --root 가 있어 아무것도 읽지 않았습니다: "
+            f"{outside}")
+
     now = dt.datetime.now().isoformat(timespec="seconds")
     known = {r[0] for r in con.execute("SELECT sha256 FROM photo")}
     stat = {"파일": 0, "새 내용": 0, "같은 내용": 0, "건너뜀": 0}
@@ -56,7 +75,12 @@ def scan(con, roots, base):
         except OSError:
             stat["건너뜀"] += 1
             continue
-        rel = str(path.relative_to(base))
+        try:
+            rel = str(path.relative_to(base))
+        except ValueError:
+            # root 는 base 안이어도 심볼릭 링크를 따라가면 밖으로 나갈 수 있습니다.
+            stat["건너뜀"] += 1
+            continue
         stat["파일"] += 1
 
         if digest in known:
@@ -85,6 +109,11 @@ def scan(con, roots, base):
         con.execute("INSERT OR REPLACE INTO file(path, sha256, bytes, seen_at)"
                     " VALUES(?,?,?,?)", (rel, digest, size, now))
 
+        # 중간중간 커밋합니다. 12,693개를 읽는 동안 케이블이 빠지거나 Ctrl+C 가
+        # 들어오면 끝에 한 번만 커밋하는 방식은 읽은 것을 전부 버립니다.
+        if stat["파일"] % commit_every == 0:
+            con.commit()
+
     con.commit()
     return stat
 
@@ -92,7 +121,12 @@ def scan(con, roots, base):
 def cmd_scan(args):
     con = index.open_db(args.db)
     roots = [pathlib.Path(r) for r in args.root] if args.root else DEFAULT_ROOTS
-    stat = scan(con, roots, args.base)
+    try:
+        stat = scan(con, roots, args.base)
+    except ValueError as exc:
+        print(exc)
+        con.close()
+        return 1
     print(f"파일 {stat['파일']}개, 새 내용 {stat['새 내용']}개, "
           f"같은 내용 {stat['같은 내용']}개, 건너뜀 {stat['건너뜀']}개")
     files = con.execute("SELECT COUNT(*) FROM file").fetchone()[0]
@@ -360,7 +394,7 @@ def cmd_keywords(args):
 
     written = empty = failed = 0
     for i, item in enumerate(items, 1):
-        words = kw.collect(con, item["sha256"], vocab)
+        words = kw.collect(con, item.get("sha256"), vocab)
         if not words:
             empty += 1
             continue
@@ -375,7 +409,8 @@ def cmd_keywords(args):
             print(f"  [{i}/{len(items)}] 진행 중")
     print(f"키워드 기록 {written}개, 붙일 게 없음 {empty}개, 실패 {failed}개")
     con.close()
-    return 0
+    # 한 장도 못 썼는데 0 을 돌려주면 쉘 스크립트와 && 연결이 성공으로 넘어갑니다.
+    return 1 if failed and not written else 0
 
 
 def main(argv=None):

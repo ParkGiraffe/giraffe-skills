@@ -8,6 +8,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -102,6 +103,74 @@ class TestScan(unittest.TestCase):
         gallery.scan(self.con, self.roots, self.base)
         after = sorted(p.name for p in (self.base / "src").rglob("*") if p.is_file())
         self.assertEqual(before, after)
+
+
+class TestScanOutsideBase(unittest.TestCase):
+    """--root 가 --base 밖이면 인덱스에 담을 상대경로 자체가 없습니다."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        self.base = self.root / "기준"
+        self.outside = self.root / "바깥"
+        self.con = index.open_db(self.root / "db" / "index.sqlite")
+        helpers.make_tree(self.base, {"안/a.jpg": helpers.jpeg_bytes()})
+        helpers.make_tree(self.outside, {"b.jpg": helpers.jpeg_bytes()})
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def test_refuses_before_reading_anything(self):
+        with self.assertRaises(ValueError):
+            gallery.scan(self.con, [self.base / "안", self.outside], self.base)
+        self.assertEqual(0, self.con.execute(
+            "SELECT COUNT(*) FROM file").fetchone()[0])
+
+    def test_error_names_the_offending_root(self):
+        with self.assertRaises(ValueError) as caught:
+            gallery.scan(self.con, [self.outside], self.base)
+        self.assertIn(str(self.outside), str(caught.exception))
+
+    def test_roots_inside_base_still_scan(self):
+        stat = gallery.scan(self.con, [self.base / "안"], self.base)
+        self.assertEqual(1, stat["파일"])
+
+
+class TestScanCommitsAlongTheWay(unittest.TestCase):
+    """끝에 한 번만 커밋하면 도중에 죽었을 때 읽은 것을 전부 버립니다."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.tmp.name)
+        self.dbpath = self.base / "db" / "index.sqlite"
+        self.con = index.open_db(self.dbpath)
+        helpers.make_tree(self.base, {
+            f"src/{i:03d}.jpg": helpers.gradient_jpeg(seed=i) for i in range(6)})
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def test_rows_are_durable_before_the_walk_ends(self):
+        seen = []
+        real = gallery.probe.sha256_of
+
+        def counting(path):
+            seen.append(path)
+            if len(seen) == 5:
+                raise KeyboardInterrupt("훑는 도중 중단")
+            return real(path)
+
+        with unittest.mock.patch.object(gallery.probe, "sha256_of", counting):
+            with self.assertRaises(KeyboardInterrupt):
+                gallery.scan(self.con, [self.base / "src"], self.base,
+                             commit_every=2)
+
+        # 커밋 안 된 것은 rollback 으로 사라집니다. 남는 것이 진짜 저장된 것입니다.
+        self.con.rollback()
+        self.assertEqual(4, self.con.execute(
+            "SELECT COUNT(*) FROM file").fetchone()[0])
 
 
 if __name__ == "__main__":
