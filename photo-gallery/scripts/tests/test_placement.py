@@ -143,5 +143,48 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(3, len({r["src"] for r in rows}))
 
 
+class TestEscapes(unittest.TestCase):
+    """계획 CSV 는 사람이 손으로 고치라고 만든 문서입니다.
+
+    목적지에 `..` 이나 절대경로가 들어가면 apply 가 갤러리 밖에 씁니다.
+    나가는 쪽인 apply 에도 검사가 있지만, 계획 단계에서 먼저 보여야 사람이
+    적용 전에 알아챕니다.
+    """
+
+    def test_plain_relative_path_is_fine(self):
+        self.assertFalse(placement.escapes("사진/2026/05/a.jpg"))
+
+    def test_dotdot_escapes(self):
+        self.assertTrue(placement.escapes("../원본/a.jpg"))
+
+    def test_dotdot_in_the_middle_escapes(self):
+        self.assertTrue(placement.escapes("사진/../../원본/a.jpg"))
+
+    def test_absolute_path_escapes(self):
+        self.assertTrue(placement.escapes("/Volumes/T7/원본/a.jpg"))
+
+    def test_backslash_separator_escapes(self):
+        """윈도우에서 고친 CSV 가 역슬래시로 올 수 있습니다."""
+        self.assertTrue(placement.escapes("..\\원본\\a.jpg"))
+
+    def test_a_name_that_merely_starts_with_dots_is_fine(self):
+        """`..` 은 경로 조각 전체일 때만 탈출입니다."""
+        self.assertFalse(placement.escapes("사진/2026/05/..보관용.jpg"))
+
+
+class TestValidateCatchesEscapes(unittest.TestCase):
+    def test_validate_reports_an_escaping_destination(self):
+        rows = [{"src": "old/a.jpg", "dst": "../원본/a.jpg",
+                 "sha256": "s1", "action": "복사"}]
+        problems = placement.validate(rows)
+        self.assertEqual(1, len(problems))
+        self.assertIn("갤러리 밖", problems[0])
+
+    def test_validate_passes_a_clean_plan(self):
+        rows = [{"src": "old/a.jpg", "dst": "사진/2026/05/a.jpg",
+                 "sha256": "s1", "action": "복사"}]
+        self.assertEqual([], placement.validate(rows))
+
+
 if __name__ == "__main__":
     unittest.main()

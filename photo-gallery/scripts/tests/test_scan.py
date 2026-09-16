@@ -136,6 +136,35 @@ class TestScanOutsideBase(unittest.TestCase):
         stat = gallery.scan(self.con, [self.base / "안"], self.base)
         self.assertEqual(1, stat["파일"])
 
+    def _link(self, link, target):
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError:
+            self.skipTest("심볼릭 링크를 못 만듭니다")
+
+    def test_a_root_that_is_a_link_pointing_out_is_refused(self):
+        """글자로는 base 안인데 링크를 따라가면 밖인 root 입니다.
+
+        그대로 훑으면 실제 파일은 base 밖에 있는데 인덱스에는 base 안의
+        상대경로가 적힙니다. 그 경로로는 아무것도 찾을 수 없습니다.
+        """
+        link = self.base / "가짜"
+        self._link(link, self.outside)
+        with self.assertRaises(ValueError):
+            gallery.scan(self.con, [link], self.base)
+
+    def test_a_link_inside_a_root_is_not_followed(self):
+        """os.walk 는 하위 심볼릭 링크를 따라가지 않습니다.
+
+        따라가기 시작하면 base 밖 파일이 base 안의 상대경로로 인덱스에 들어가고,
+        루프 안에는 그것을 막을 자리가 없습니다.
+        """
+        self._link(self.base / "안" / "바깥으로", self.outside)
+        stat = gallery.scan(self.con, [self.base / "안"], self.base)
+        self.assertEqual(1, stat["파일"])
+        paths = [r[0] for r in self.con.execute("SELECT path FROM file")]
+        self.assertEqual(["안/a.jpg"], paths)
+
 
 class TestScanCommitsAlongTheWay(unittest.TestCase):
     """끝에 한 번만 커밋하면 도중에 죽었을 때 읽은 것을 전부 버립니다."""

@@ -7,8 +7,6 @@
 import json
 import os
 import pathlib
-import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -73,23 +71,11 @@ class TestApply(unittest.TestCase):
         self.assertNotAlmostEqual(old_time, copied, delta=1,
                                   msg="원본 메타데이터가 복사본에 따라왔습니다")
 
-    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("xattr"),
-                         "xattr 명령 없음")
-    def test_copy_does_not_carry_extended_attributes(self):
-        """짝꿍 파일을 만드는 진짜 원인은 확장속성입니다.
-
-        복사본에 확장속성이 하나도 없는지를 보면 안 됩니다. macOS 가 파일을 쓴
-        프로세스를 기록하려고 com.apple.provenance 를 제 손으로 붙이기 때문에,
-        copy 를 써도 그것 하나는 항상 있습니다. 원본의 것이 따라왔는지만 봅니다.
-        """
-        src = self.base / "old/a/IMG_1.jpg"
-        subprocess.run(["xattr", "-w", "com.apple.metadata:시험", "값", str(src)],
-                       check=True)
-        applymod.run(self.rows, self.base, self.gallery, self.journal)
-        out = subprocess.run(["xattr", str(self.gallery / "사진/2026/05/x.jpg")],
-                             capture_output=True, text=True)
-        self.assertNotIn("com.apple.metadata:시험", out.stdout,
-                         "원본 확장속성이 복사본에 따라왔습니다")
+    # 확장속성이 따라왔는지 직접 보는 검사는 두지 않습니다. macOS 에는
+    # os.listxattr 이 없어서 shutil._copyxattr 이 통째로 빈 함수입니다.
+    # copy 든 copy2 든 copyfile 이든 확장속성은 어차피 안 따라오므로, 그런
+    # 검사는 어떤 조건에서도 실패할 수 없습니다. 위의 mtime 검사가 copy2
+    # 회귀를 실제로 잡습니다.
 
     def test_journal_records_every_row(self):
         path = applymod.run(self.rows, self.base, self.gallery, self.journal)

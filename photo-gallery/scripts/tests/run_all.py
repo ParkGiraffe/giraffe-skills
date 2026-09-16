@@ -32,19 +32,24 @@ for path in FILES:
         skipped[path.name] = int(m.group(1))
 
 print()
+
+# 건너뛴 검사를 세어 함께 찍습니다. 종료코드만 보면 exiftool 이 없는 기계에서
+# 키워드 쓰기 검사가 조용히 빠진 채로 "전부 통과" 가 찍힙니다. 하필 이
+# 프로젝트에서 사용자 사진 파일을 실제로 고치는 유일한 경로입니다.
+#
+# 실패가 있을 때도 먼저 찍습니다. 실패 때문에 안 보이면, 고치고 다시 돌릴
+# 때까지 건너뛴 것이 있다는 사실 자체를 모릅니다.
+if skipped:
+    total = sum(skipped.values())
+    print(f"건너뛴 검사 {total}개입니다. 이유는 위 출력에 적혀 있습니다.")
+    for name, n in sorted(skipped.items()):
+        print(f"  {name}: {n}개")
+    print("exiftool 이 없으면 키워드 쓰기 검사가 통째로 빠집니다.")
+
 if failed:
     print(f"실패: {', '.join(failed)}")
     raise SystemExit(1)
-
-# 건너뛴 검사를 세어 함께 찍습니다. 종료코드만 보면 exiftool 이 없는 기계에서
-# 키워드 쓰기 검사 다섯 개가 조용히 빠진 채로 "전부 통과" 가 찍힙니다.
-# 하필 이 프로젝트에서 사용자 사진 파일을 실제로 고치는 유일한 경로입니다.
 if skipped:
-    total = sum(skipped.values())
-    print(f"{len(FILES)}개 파일 통과. 다만 검사 {total}개를 건너뛰었습니다.")
-    for name, n in sorted(skipped.items()):
-        print(f"  {name}: {n}개")
-    print("건너뛴 이유는 위 출력에 적혀 있습니다. exiftool 이 없으면 키워드"
-          " 쓰기 검사가 통째로 빠집니다.")
+    print(f"{len(FILES)}개 파일 통과. 다만 위의 검사는 안 돌았습니다.")
 else:
     print(f"{len(FILES)}개 파일 전부 통과")

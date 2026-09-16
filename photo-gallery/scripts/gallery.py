@@ -46,8 +46,17 @@ COMMIT_EVERY = 500
 
 
 def _under(path, base):
+    """path 가 base 안에 있는지 봅니다.
+
+    글자 그대로도, 심볼릭 링크를 따라간 뒤에도 안이어야 합니다. 둘 다 필요합니다.
+    글자 그대로 안이어야 relative_to 로 상대경로를 뽑을 수 있고, 링크를 따라가서도
+    안이어야 인덱스에 적는 상대경로가 실제 파일이 있는 자리를 가리킵니다.
+    """
+    path = pathlib.Path(path)
     try:
-        return pathlib.Path(path).resolve().is_relative_to(base.resolve())
+        if not path.is_relative_to(base):
+            return False
+        return path.resolve().is_relative_to(base.resolve())
     except (OSError, ValueError):
         return False
 
@@ -75,12 +84,10 @@ def scan(con, roots, base, commit_every=COMMIT_EVERY):
         except OSError:
             stat["건너뜀"] += 1
             continue
-        try:
-            rel = str(path.relative_to(base))
-        except ValueError:
-            # root 는 base 안이어도 심볼릭 링크를 따라가면 밖으로 나갈 수 있습니다.
-            stat["건너뜀"] += 1
-            continue
+        # relative_to 는 글자만 봅니다. root 가 글자 그대로 base 안이면
+        # os.walk 가 내놓는 경로도 전부 글자 그대로 base 안이라 이 호출은
+        # 실패할 수 없습니다. 위에서 root 를 먼저 거르는 이유입니다.
+        rel = str(path.relative_to(base))
         stat["파일"] += 1
 
         if digest in known:
@@ -411,8 +418,10 @@ def cmd_keywords(args):
             print(f"  [{i}/{len(items)}] 진행 중")
     print(f"키워드 기록 {written}개, 붙일 게 없음 {empty}개, 실패 {failed}개")
     con.close()
-    # 한 장도 못 썼는데 0 을 돌려주면 쉘 스크립트와 && 연결이 성공으로 넘어갑니다.
-    return 1 if failed and not written else 0
+    # 실패가 하나라도 있으면 0 을 돌려주지 않습니다. "한 장도 못 썼을 때만"
+    # 으로 문턱을 두면 1,000장 실패에 1장 성공이 성공으로 넘어갑니다. 실패 수는
+    # 위에 찍히므로 사람이 보고 판단하면 됩니다.
+    return 1 if failed else 0
 
 
 def main(argv=None):
