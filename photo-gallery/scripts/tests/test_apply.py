@@ -72,6 +72,70 @@ class TestApply(unittest.TestCase):
         self.assertEqual(2, rec["건너뜀"])
 
 
+class TestCrashRecovery(unittest.TestCase):
+    """중간에 죽었다 다시 돌렸을 때도 되돌릴 수 있어야 합니다."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.tmp.name)
+        self.gallery = self.base / "갤러리"
+        self.journal = self.base / "작업기록"
+        helpers.make_tree(self.base, {"old/a.jpg": helpers.gradient_jpeg(seed=1),
+                                      "old/b.jpg": helpers.gradient_jpeg(seed=2)})
+        self.rows = [
+            {"src": "old/a.jpg", "dst": "사진/a.jpg", "sha256": "s1", "action": "복사"},
+            {"src": "old/b.jpg", "dst": "사진/b.jpg", "sha256": "s2", "action": "복사"},
+        ]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_rerun_records_already_copied_files(self):
+        """앞선 실행이 남긴 복사본도 이번 기록에 잡혀야 되돌리기가 닿습니다.
+
+        기록에 없으면 undo 가 못 지웁니다. 52GB 짜리 작업이 중간에 죽는 것은
+        드문 일이 아닙니다.
+        """
+        applymod.run(self.rows[:1], self.base, self.gallery, self.journal)
+        path = applymod.run(self.rows, self.base, self.gallery, self.journal)
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual({"사진/a.jpg", "사진/b.jpg"},
+                         {i["dst"] for i in rec["항목"]})
+        self.assertEqual(2, applymod.undo(path, self.gallery))
+        self.assertFalse((self.gallery / "사진/a.jpg").exists())
+        self.assertFalse((self.gallery / "사진/b.jpg").exists())
+
+    def test_journal_survives_a_crash_midway(self):
+        """도중에 죽어도 그때까지 복사한 것이 기록에 남아야 합니다.
+
+        끝에 한 번만 쓰면 기록 파일 자체가 안 생겨서, 이미 디스크에 올라간
+        수천 장을 되돌릴 방법이 없습니다.
+        """
+        def rows_then_crash():
+            for i in range(applymod.FLUSH_EVERY):
+                yield {"src": "old/a.jpg", "dst": f"사진/{i}.jpg",
+                       "sha256": f"s{i}", "action": "복사"}
+            raise KeyboardInterrupt("복사 도중 중단")
+
+        with self.assertRaises(KeyboardInterrupt):
+            applymod.run(rows_then_crash(), self.base, self.gallery, self.journal)
+
+        written = sorted(self.journal.glob("*.json"))
+        self.assertEqual(1, len(written), "중단됐는데 작업기록이 없습니다")
+        rec = json.loads(written[0].read_text(encoding="utf-8"))
+        self.assertEqual(applymod.FLUSH_EVERY, len(rec["항목"]))
+
+    def test_undo_refuses_a_journal_pointing_outside(self):
+        """작업기록은 손으로 고칠 수 있으므로 갤러리 밖을 가리킬 수 있습니다."""
+        path = applymod.run(self.rows, self.base, self.gallery, self.journal)
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        rec["항목"][0]["dst"] = "../old/a.jpg"
+        path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+        with self.assertRaises(RuntimeError):
+            applymod.undo(path, self.gallery)
+        self.assertTrue((self.base / "old/a.jpg").exists())
+
+
 class TestVerifyAndUndo(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
