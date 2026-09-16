@@ -100,11 +100,12 @@ class TestBuild(unittest.TestCase):
             placement.build(self.con)
         self.assertIn("고아.jpg", str(caught.exception))
 
-    def test_screenshot_goes_to_screenshot_tree(self):
+    def test_screenshot_goes_under_its_month(self):
         self.photo("bb", "old/IMG_2.PNG", kind="스크린샷")
         self.con.commit()
         rows = placement.build(self.con)
-        self.assertTrue(rows[0]["dst"].startswith("스크린샷/2026/05/"))
+        self.assertTrue(rows[0]["dst"].startswith("사진/2026/05/스크린샷/"),
+                        rows[0]["dst"])
 
     def test_event_photo_goes_into_event_folder(self):
         self.con.execute("INSERT INTO event(id, folder, name, start_at, end_at)"
@@ -115,11 +116,26 @@ class TestBuild(unittest.TestCase):
         rows = placement.build(self.con)
         self.assertIn("/20260501_성수 메가페스타 1차/", rows[0]["dst"])
 
-    def test_unknown_date_goes_to_quarantine_folder(self):
-        self.photo("dd", "old/IMG_4.jpg", shot=None)
+    def test_unknown_date_keeps_its_subject_folder(self):
+        """날짜를 못 정해도 _시스템 밑으로 보내지 않습니다.
+
+        그 사진들은 사용자가 가진 유일본입니다. 시간 축을 못 쓰므로 원래
+        묶여 있던 주제 폴더를 그대로 씁니다.
+        """
+        self.photo("dd", "어떤 폴더/IMG_4.jpg", shot=None)
         self.con.commit()
         rows = placement.build(self.con)
-        self.assertTrue(rows[0]["dst"].startswith("_시스템/미상날짜/"))
+        self.assertEqual("날짜미상/어떤 폴더/IMG_4.jpg", rows[0]["dst"])
+        self.assertFalse(rows[0]["dst"].startswith("_시스템"))
+
+    def test_a_curated_subject_folder_stays_whole(self):
+        """동동이 사진 135장이 30개 연월 폴더로 흩어지면 안 됩니다."""
+        self.photo("ff", "동동이 사진/IMG_7.jpg")
+        self.photo("gg", "동동이 사진/IMG_8.jpg", shot=None)
+        self.con.commit()
+        dsts = {r["sha256"]: r["dst"] for r in placement.build(self.con)}
+        self.assertTrue(dsts["ff"].startswith("동동이 사진/"), dsts["ff"])
+        self.assertTrue(dsts["gg"].startswith("동동이 사진/"), dsts["gg"])
 
     def test_exact_duplicate_second_file_is_quarantined(self):
         self.photo("ee", "old/a/IMG_5.jpg")

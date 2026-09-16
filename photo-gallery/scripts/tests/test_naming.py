@@ -152,8 +152,9 @@ class TestDestination(unittest.TestCase):
                          naming.destination("사진", self.D, "20260501_155339_IMG_1.jpg",
                                             "20260501_성수 메가페스타 1차"))
 
-    def test_screenshot_default(self):
-        self.assertEqual("스크린샷/2026/05/20260501_155542_Pokmon GO.jpg",
+    def test_screenshot_sits_under_its_month(self):
+        """스크린샷을 최상위에 따로 두지 않습니다. 그 달 사진 옆에 둡니다."""
+        self.assertEqual("사진/2026/05/스크린샷/20260501_155542_Pokmon GO.jpg",
                          naming.destination("스크린샷", self.D, "20260501_155542_Pokmon GO.jpg"))
 
     def test_screenshot_pulled_into_event(self):
@@ -170,7 +171,7 @@ class TestDestination(unittest.TestCase):
         self.assertTrue(naming.destination("사진", d, "x.jpg").startswith("사진/2024/03/"))
 
     def test_unknown_date_goes_to_quarantine(self):
-        self.assertEqual("_시스템/미상날짜/IMG_2713.PNG",
+        self.assertEqual("날짜미상/IMG_2713.PNG",
                          naming.destination("사진", None, "IMG_2713.PNG"))
 
 
@@ -324,7 +325,93 @@ class TestMonthOnlyStamp(unittest.TestCase):
         """월을 모르면 월 폴더를 정할 수 없습니다. 01 에서 12 만 씁니다."""
         got = naming.destination("사진", dt.datetime(2023, 1, 1),
                                  "20230000_000000_IMG_1.jpg", src=naming.FOLDER_YEAR)
-        self.assertEqual("_시스템/미상날짜/20230000_000000_IMG_1.jpg", got)
+        self.assertEqual("날짜미상/20230000_000000_IMG_1.jpg", got)
+
+
+class TestUndatedPlacement(unittest.TestCase):
+    """날짜를 못 정한 사진도 갤러리 안에 둡니다.
+
+    _시스템 밑에 두면 도구가 쓰는 파일처럼 보이는데, 그 사진들은 사용자가 가진
+    유일본입니다. 앱을 거치며 EXIF 가 떨어져 나간 것뿐입니다.
+    """
+
+    def test_a_curated_subject_folder_is_kept_whole(self):
+        """사람이 주제로 묶어 둔 폴더는 그 묶음 자체가 정보입니다."""
+        got = naming.destination("사진", None, "IMG_1.JPG", group="동동이 사진")
+        self.assertEqual("동동이 사진/IMG_1.JPG", got)
+
+    def test_a_dated_photo_in_a_subject_folder_stays_there(self):
+        """연/월로 흩으면 135장이 30개 폴더로 흩어집니다."""
+        got = naming.destination("사진", dt.datetime(2020, 1, 15, 14, 30, 22),
+                                 "20200115_143022_IMG_1.JPG", group="동동이 사진")
+        self.assertEqual("동동이 사진/20200115_143022_IMG_1.JPG", got)
+
+    def test_an_unlisted_subject_goes_to_the_undated_folder(self):
+        got = naming.destination("사진", None, "IMG_1.JPG", group="어떤 폴더")
+        self.assertEqual("날짜미상/어떤 폴더/IMG_1.JPG", got)
+
+    def test_without_a_subject_it_sits_at_the_top(self):
+        got = naming.destination("사진", None, "IMG_1.JPG")
+        self.assertEqual("날짜미상/IMG_1.JPG", got)
+
+    def test_it_is_not_under_the_system_folder(self):
+        got = naming.destination("사진", None, "IMG_1.JPG", group="어떤 폴더")
+        self.assertFalse(got.startswith("_시스템"), got)
+
+    def test_a_date_structured_root_is_not_a_subject(self):
+        """아이폰 12 pro 는 밑에 연/월이 들어 있어 날짜가 곧 구조입니다."""
+        self.assertNotIn("아이폰 12 pro", naming.SUBJECT_ROOTS)
+        self.assertNotIn("카메라 앨범", naming.SUBJECT_ROOTS)
+
+
+class TestSubjectFolder(unittest.TestCase):
+    def test_last_non_date_folder_wins(self):
+        self.assertEqual("동동이 사진", naming.subject_folder(
+            "002_Areas/001_사진/동동이 사진/IMG_1.JPG"))
+
+    def test_date_folders_are_skipped(self):
+        self.assertEqual("아이폰 12 pro", naming.subject_folder(
+            "002_Areas/001_사진/아이폰 12 pro/2024/7월/IMG_1.JPG"))
+
+    def test_the_innermost_subject_wins(self):
+        self.assertEqual("포켓몬고페스트", naming.subject_folder(
+            "002_Areas/001_사진/아이폰 12 pro/2024/7월/포켓몬고페스트/IMG_1.JPG"))
+
+    def test_nfd_folder_name(self):
+        got = naming.subject_folder(
+            ud.normalize("NFD", "002_Areas/001_사진/동동이 사진/IMG_1.JPG"))
+        self.assertEqual("동동이 사진", got)
+
+    def test_no_folder_at_all(self):
+        self.assertIsNone(naming.subject_folder("IMG_1.JPG"))
+
+
+class TestMonthRangeFolder(unittest.TestCase):
+    """1월-2월 처럼 두 달에 걸친 폴더는 시작 월을 씁니다.
+
+    여러 날에 걸친 행사 폴더가 시작일만 쓰는 것과 같은 규칙입니다.
+    """
+
+    def test_korean_month_range(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1835.JPG", None, "/T7/아이폰 12 pro/2023/1월-2월/IMG_1835.JPG")
+        self.assertEqual(naming.FOLDER_MONTH, src)
+        self.assertEqual((2023, 1), (got.year, got.month))
+
+    def test_range_with_spaces(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1.JPG", None, "/T7/아이폰 12 pro/2023/11월 - 12월/IMG_1.JPG")
+        self.assertEqual((2023, 11), (got.year, got.month))
+
+    def test_a_single_month_still_works(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1.JPG", None, "/T7/아이폰 12 pro/2024/7월/IMG_1.JPG")
+        self.assertEqual((2024, 7), (got.year, got.month))
+
+    def test_a_nonsense_range_is_not_a_month(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1.JPG", None, "/T7/아이폰 12 pro/2024/13월-99월/IMG_1.JPG")
+        self.assertEqual(naming.FOLDER_YEAR, src)
 
 
 class TestNfdFilenames(unittest.TestCase):

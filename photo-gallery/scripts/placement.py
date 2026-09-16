@@ -66,7 +66,8 @@ def build(con, threshold=4):
                 filename = (naming.normalize_name(name, meta["shot"], meta["src"])
                             if meta["shot"] else name)
                 dst = naming.destination(meta["kind"], meta["shot"], filename,
-                                         meta["event"], meta["src"])
+                                         meta["event"], meta["src"],
+                                         naming.subject_folder(path))
                 action = "복사"
             else:
                 dst = f"{QUARANTINE}/{sha[:12]}_{name}"

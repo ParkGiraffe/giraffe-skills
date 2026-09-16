@@ -67,7 +67,59 @@ FOLDER_YEAR = "folder-year"
 # 같은 폴더가 EXIF 가 벗겨진 사진의 유일한 단서입니다. mtime 과 달리 복사로
 # 오염되지 않습니다. 사람이 적어 둔 것이기 때문입니다.
 _YEAR_PART = re.compile(r"^(19|20)\d{2}$")
-_MONTH_PART = re.compile(r"^(1[0-2]|0?[1-9])월?$")
+# "7월", "02", "1월-2월" 을 모두 받습니다. 두 달에 걸친 폴더는 시작 월을 씁니다.
+# 여러 날에 걸친 행사 폴더가 시작일만 쓰는 것과 같은 규칙입니다.
+_MONTH_PART = re.compile(r"^(1[0-2]|0?[1-9])월?(?:\s*[-~]\s*(?:1[0-2]|0?[1-9])월?)?$")
+
+# 주제 폴더. 사용자가 "동동이 사진", "운동" 처럼 묶어 둔 이름입니다. 날짜를
+# 끝내 못 정했을 때 이것만 남습니다.
+_UNDATED = "날짜미상"
+
+# 시간축으로 흩지 않고 그대로 두는 주제 폴더입니다.
+#
+# 사람이 주제로 묶어 둔 평평한 폴더는 그 묶음 자체가 정보입니다. 연/월로 흩으면
+# 동동이 사진 135장이 30개 연월 폴더로 흩어져 한 마리의 기록으로 볼 수 없게
+# 됩니다. 폴더 안에서는 YYYYMMDD_HHMMSS 이름으로 시간순 정렬되고, 날짜를 못
+# 정한 것은 원래 이름 그대로 뒤쪽에 모입니다.
+#
+# 연/월 폴더가 이미 들어 있는 원본 트리(아이폰 12 pro, 카메라 앨범 등)는 여기
+# 넣지 않습니다. 그쪽은 날짜가 곧 구조입니다.
+SUBJECT_ROOTS = ("동동이 사진", "박기린", "운동")
+
+# 파일 수정일. 마지막 수단입니다. 기본으로는 쓰지 않습니다.
+#
+# 촬영시각으로 못 씁니다. 실측으로 EXIF 를 아는 4,000장 중 수정일이 촬영시각과
+# 1분 이내로 맞는 것이 0장이고 97.2%가 하루 넘게 어긋납니다. 2016년 사진의
+# 수정일이 2023년인 것도 있습니다. 폴더를 통째로 옮긴 날짜가 찍히기 때문입니다.
+#
+# 그래서 resolve_datetime 은 이것을 보지 않습니다. 다른 모든 단서가 없어서
+# 영영 날짜미상에 남을 파일에 한해, 사용자가 그래도 연/월 폴더에 넣겠다고
+# 정했을 때만 호출자가 따로 씁니다. 출처를 mtime 으로 남겨 나중에 구분합니다.
+MTIME = "mtime"
+
+
+def from_mtime(path):
+    """파일 수정일로 (datetime, "mtime") 을 만듭니다. 마지막 수단입니다."""
+    try:
+        return dt.datetime.fromtimestamp(os.stat(path).st_mtime).replace(
+            microsecond=0), MTIME
+    except OSError:
+        return None, "unknown"
+
+
+def subject_folder(relpath):
+    """경로에서 날짜가 아닌 마지막 폴더 이름을 돌려줍니다.
+
+    "002_Areas/001_사진/동동이 사진/IMG_1.JPG" 면 "동동이 사진" 입니다.
+    가장 안쪽의 날짜 아닌 폴더가 가장 구체적인 주제입니다.
+    """
+    parts = [ud.normalize("NFC", x) for x in
+             pathlib.PurePosixPath(str(relpath).replace("\\", "/")).parts[:-1]]
+    for part in reversed(parts):
+        if _YEAR_PART.match(part) or _MONTH_PART.match(part):
+            continue
+        return part
+    return None
 
 
 def from_origin_path(origin):
@@ -86,6 +138,7 @@ def from_origin_path(origin):
         nxt = parts[i + 1] if i + 1 < len(parts) else ""
         m = _MONTH_PART.match(nxt)
         if m:
+            # "1월-2월" 이면 시작 월을 씁니다.
             return dt.datetime(year, int(m.group(1)), 1), FOLDER_MONTH
         return dt.datetime(year, 1, 1), FOLDER_YEAR
     return None, "unknown"
@@ -226,17 +279,29 @@ def event_folder_name(when, name):
     return f"{when.strftime('%Y%m%d')}_{safe}"
 
 
-def destination(kind, when, filename, event_folder=None, src="exif"):
+def destination(kind, when, filename, event_folder=None, src="exif", group=None):
     """갤러리 루트 기준 상대경로를 돌려줍니다.
 
-    연만 알아낸 사진은 월 폴더를 정할 수 없으므로 미상날짜에 남깁니다. 월 폴더는
-    항상 01 에서 12 여야 문자 정렬이 유지됩니다.
+    SUBJECT_ROOTS 에 든 주제 폴더는 시간축으로 흩지 않고 그대로 둡니다. 폴더
+    안에서는 이름이 YYYYMMDD_HHMMSS 로 시작해 시간순으로 정렬됩니다.
+
+    날짜를 끝내 못 정한 사진도 갤러리 안에 둡니다. _시스템 밑에 두면 도구가
+    쓰는 파일처럼 보이는데, 그 사진들은 사용자가 가진 유일본입니다. 앱을 거치며
+    EXIF 가 떨어져 나간 것이라 되찾을 촬영시각이 파일 안에 없을 뿐입니다.
+    시간 축을 못 쓰므로 원래 묶여 있던 주제 폴더를 그대로 씁니다.
+
+    연만 알아낸 사진도 여기로 옵니다. 월 폴더는 항상 01 에서 12 여야 문자
+    정렬이 유지되므로 월을 모르면 월 폴더를 만들 수 없습니다.
     """
+    if group in SUBJECT_ROOTS:
+        return f"{group}/{filename}"
     if when is None or src == FOLDER_YEAR:
-        return f"_시스템/미상날짜/{filename}"
+        return f"{_UNDATED}/{group}/{filename}" if group else f"{_UNDATED}/{filename}"
     ym = f"{when.year:04d}/{when.month:02d}"
     if event_folder:
         return f"사진/{ym}/{event_folder}/{filename}"
     if kind == "스크린샷":
-        return f"스크린샷/{ym}/{filename}"
+        # 스크린샷을 최상위에 따로 두지 않습니다. 그 달의 사진을 보러 갔을 때
+        # 같은 자리에서 그 달의 스크린샷도 보이는 편이 낫습니다.
+        return f"사진/{ym}/스크린샷/{filename}"
     return f"사진/{ym}/{filename}"
