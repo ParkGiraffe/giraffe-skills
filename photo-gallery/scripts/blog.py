@@ -55,8 +55,14 @@ def split_tag(title):
 
 
 def event_name(title):
-    """행사명만 남깁니다. 대괄호 태그, 콜론 뒤 부제, 방문기 같은 접미를 뗍니다."""
-    _tag, rest = split_tag(title)
+    """행사명만 남깁니다. 대괄호 태그, 콜론 뒤 부제, 방문기 같은 접미를 뗍니다.
+
+    남는 이름이 너무 짧으면 대괄호 태그를 대신 씁니다. 연재글은 행사 이름을
+    태그에 두고 제목에는 회차만 적는 경우가 있습니다. 예를 들어
+    "[포켓몬 스포츠데이 2026] 토요일 방문후기 (1/2)" 는 "토요일" 만 남는데
+    폴더 이름으로 아무 의미가 없습니다.
+    """
+    tag, rest = split_tag(title)
     # 이 블로그는 부제 구분자로 콜론과 슬래시를 둘 다 씁니다. 슬래시를 안 자르면
     # "생애 첫 국전 방문기 / 피규어와 가챠샵 털기 / 2026.01" 이 통째로 폴더 이름이
     # 됩니다. 공백이 양쪽에 있는 " / " 만 자릅니다. "집 앞마당/집터" 처럼 붙은
@@ -64,7 +70,13 @@ def event_name(title):
     rest = rest.split(" : ")[0].split(" :")[0].split(" / ")[0]
     rest = re.split(r"\.\.|!!|\?\?", rest)[0]
     rest = _SUFFIX.sub("", rest)
-    return rest.strip(" .,!?")
+    # 연재 번호를 뗍니다. "7. 고 페스트 2026 코엑스 1일차" 의 앞 "7. " 은
+    # 블로그 연재 순번이지 행사 이름이 아닙니다.
+    rest = re.sub(r"^\d{1,3}\.\s*", "", rest.strip())
+    rest = rest.strip(" .,!?")
+    if tag and len(rest) < 4:
+        return tag.strip()
+    return rest
 
 
 def parse_image_names(html):

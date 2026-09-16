@@ -92,6 +92,29 @@ class TestEventName(unittest.TestCase):
             "두찜 콜라보 아크릴 키링 세트",
             blog.event_name("[니케 굿즈] 두찜 콜라보 아크릴 키링 세트 / 흑련과 '드'로시(도로시)"))
 
+    def test_drops_series_number(self):
+        """앞의 "7. " 은 블로그 연재 순번이지 행사 이름이 아닙니다."""
+        self.assertEqual(
+            "고 페스트 2026 코엑스 1일차",
+            blog.event_name("[포켓몬 GO] 7. 고 페스트 2026 코엑스 1일차 : 메가뮤츠X와 제라오라"))
+        self.assertEqual(
+            "예약구매 & 출시대기 중",
+            blog.event_name("[포코피아] 0. 예약구매 & 출시대기 중 / 키 카드 대신 DL로"))
+
+    def test_too_short_name_falls_back_to_tag(self):
+        """남는 이름이 너무 짧으면 폴더 이름으로 쓸 수 없습니다.
+
+        연재글은 행사 이름을 태그에 두고 제목에는 회차만 적기도 합니다.
+        """
+        self.assertEqual(
+            "포켓몬 스포츠데이 2026",
+            blog.event_name("[포켓몬 스포츠데이 2026] 토요일 방문후기 (1/2) : 잉어킹 조리개 가방"))
+
+    def test_long_enough_name_is_kept(self):
+        """짧다고 무조건 태그로 바꾸지는 않습니다."""
+        self.assertEqual("생애 첫 국전",
+                         blog.event_name("[국전 탐방] 생애 첫 국전 방문기 / 피규어와 가챠샵 털기"))
+
     def test_keeps_slash_inside_word(self):
         """공백 없이 붙은 슬래시는 한 단어의 일부일 수 있어 자르지 않습니다."""
         self.assertEqual(
