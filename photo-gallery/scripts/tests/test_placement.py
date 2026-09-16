@@ -82,6 +82,24 @@ class TestBuild(unittest.TestCase):
         self.assertEqual("사진/2026/05/20260501_155339_IMG_1.jpg", rows[0]["dst"])
         self.assertEqual("복사", rows[0]["action"])
 
+    def test_orphan_file_row_refuses_to_plan(self):
+        """photo 행이 없는 file 행은 조용히 건너뛰면 안 됩니다.
+
+        이 함수는 파일을 옮기기 직전의 마지막 관문이라, 빠진 파일은 갤러리에
+        영영 도착하지 않는데 아무도 모릅니다. 지금은 외래키가 막아 주지만
+        그 보장이 코드 밖에 있으므로 여기서도 막습니다.
+        """
+        self.photo("aa", "old/IMG_1.jpg")
+        self.con.commit()
+        # PRAGMA 는 트랜잭션 밖에서만 먹습니다. 커밋 뒤에 끕니다.
+        self.con.execute("PRAGMA foreign_keys = OFF")
+        self.con.execute("INSERT INTO file(path, sha256, bytes, seen_at)"
+                         " VALUES('old/고아.jpg','없는해시',1000,'t')")
+        self.con.commit()
+        with self.assertRaises(RuntimeError) as caught:
+            placement.build(self.con)
+        self.assertIn("고아.jpg", str(caught.exception))
+
     def test_screenshot_goes_to_screenshot_tree(self):
         self.photo("bb", "old/IMG_2.PNG", kind="스크린샷")
         self.con.commit()

@@ -46,11 +46,19 @@ def build(con, threshold=4):
         for sha in group:
             near_keeper[sha] = keeper
 
+    orphans = [path for sha, paths in files.items() if sha not in photos
+               for path in paths]
+    if orphans:
+        # 조용히 건너뛰면 안 됩니다. 이 함수는 파일을 옮기기 직전의 마지막 관문이고,
+        # 빠진 파일은 갤러리에 영영 도착하지 않는데 아무도 모릅니다.
+        # 지금은 file.sha256 의 외래키가 막아 주지만, 그 보장이 코드 밖에 있습니다.
+        raise RuntimeError(
+            f"photo 행이 없는 file 행이 {len(orphans)}개 있습니다. "
+            f"인덱스가 깨졌으니 계획을 만들지 않습니다. 예: {orphans[:3]}")
+
     rows = []
     for sha, paths in files.items():
-        meta = photos.get(sha)
-        if meta is None:
-            continue
+        meta = photos[sha]
         keeper = near_keeper.get(sha, sha)
         for i, path in enumerate(paths):
             name = os.path.basename(path)
