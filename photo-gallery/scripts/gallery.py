@@ -220,16 +220,30 @@ def cmd_event(args):
     con = index.open_db(args.db)
     cands = events.candidates(con)
     print(f"이벤트 후보 {len(cands)}건\n")
-    for c in cands:
-        folder = nm.event_folder_name(c["day"], c["name"])
+
+    # 같은 이름이 둘 이상 나오는 후보를 미리 찾아 둡니다. 1/2, 2/2 다회차 글이
+    # 같은 날 같은 이름을 내놓습니다. 사용자가 검토할 때 합칠지 이름을 다르게
+    # 줄지 정해야 하는데, 표시가 없으면 그냥 지나칩니다.
+    names = [nm.event_folder_name(c["day"], c["name"]) for c in cands]
+    dup_names = {n for n in names if names.count(n) > 1}
+
+    for c, base in zip(cands, names):
         ss = events.screenshots_in_window(con, c["start"], c["end"])
-        print(f"{folder}")
-        print(f"  사진 {len(c['shas'])}장, 시간창 {c['start']:%H:%M}~{c['end']:%H:%M}, "
+        mark = "  [이름 중복, 검토 필요]" if base in dup_names else ""
+        print(f"{base}{mark}")
+        if c["start"].date() == c["end"].date():
+            window = f"{c['start']:%H:%M}~{c['end']:%H:%M}"
+        else:
+            window = f"{c['start']:%m-%d %H:%M}~{c['end']:%m-%d %H:%M}"
+        print(f"  사진 {len(c['shas'])}장, 시간창 {window}, "
               f"창 안 스크린샷 {len(ss)}장")
         print(f"  원제 {c['title'][:70]}")
         if args.save:
-            events.save(con, c, folder)
+            events.save(con, c, events.unique_folder(con, base))
         print()
+    if dup_names:
+        print(f"이름이 겹치는 후보가 {len(dup_names)}건 있습니다. "
+              f"--save 하면 뒤쪽에 _2 가 붙습니다.\n")
     if args.save:
         print("인덱스에 저장했습니다.")
     else:

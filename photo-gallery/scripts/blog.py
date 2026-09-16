@@ -57,7 +57,11 @@ def split_tag(title):
 def event_name(title):
     """행사명만 남깁니다. 대괄호 태그, 콜론 뒤 부제, 방문기 같은 접미를 뗍니다."""
     _tag, rest = split_tag(title)
-    rest = rest.split(" : ")[0].split(" :")[0]
+    # 이 블로그는 부제 구분자로 콜론과 슬래시를 둘 다 씁니다. 슬래시를 안 자르면
+    # "생애 첫 국전 방문기 / 피규어와 가챠샵 털기 / 2026.01" 이 통째로 폴더 이름이
+    # 됩니다. 공백이 양쪽에 있는 " / " 만 자릅니다. "집 앞마당/집터" 처럼 붙은
+    # 슬래시는 한 단어의 일부일 수 있습니다.
+    rest = rest.split(" : ")[0].split(" :")[0].split(" / ")[0]
     rest = re.split(r"\.\.|!!|\?\?", rest)[0]
     rest = _SUFFIX.sub("", rest)
     return rest.strip(" .,!?")

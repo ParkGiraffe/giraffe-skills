@@ -124,6 +124,33 @@ class TestAssign(TestDb):
             self.con.execute("SELECT event_id FROM photo WHERE sha256='ss'").fetchone()[0])
 
 
+class TestUniqueFolder(TestDb):
+    def test_free_name_is_returned_as_is(self):
+        self.con.commit()
+        self.assertEqual("20260530_띵조페스티벌 2026",
+                         events.unique_folder(self.con, "20260530_띵조페스티벌 2026"))
+
+    def test_taken_name_gets_a_suffix(self):
+        """1/2, 2/2 다회차 글이 같은 날 같은 이름을 내놓습니다.
+
+        event.folder 에 UNIQUE 가 걸려 있어 그대로 저장하면
+        FOREIGN KEY constraint failed 로 죽습니다.
+        """
+        self.con.execute("INSERT INTO event(folder, name, start_at, end_at)"
+                         " VALUES('20260530_띵조페스티벌 2026','x','s','e')")
+        self.con.commit()
+        self.assertEqual("20260530_띵조페스티벌 2026_2",
+                         events.unique_folder(self.con, "20260530_띵조페스티벌 2026"))
+
+    def test_third_collision_gets_three(self):
+        for suffix in ("", "_2"):
+            self.con.execute("INSERT INTO event(folder, name, start_at, end_at)"
+                             " VALUES(?,'x','s','e')", ("20260530_행사" + suffix,))
+        self.con.commit()
+        self.assertEqual("20260530_행사_3",
+                         events.unique_folder(self.con, "20260530_행사"))
+
+
 class TestSave(TestDb):
     def test_writes_event_and_links_photos(self):
         for i in range(3):

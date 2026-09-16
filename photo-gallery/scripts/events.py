@@ -71,6 +71,23 @@ def screenshots_in_window(con, start, end):
         (start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds"))).fetchall()
 
 
+def unique_folder(con, folder):
+    """이미 쓰인 폴더명이면 _2, _3 을 붙입니다.
+
+    event.folder 에 UNIQUE 가 걸려 있고 save 가 INSERT OR REPLACE 를 쓰므로,
+    중복이 오면 REPLACE 가 앞 행을 지우려다 딸린 photo.event_id 때문에
+    FOREIGN KEY constraint failed 로 죽습니다. 1/2, 2/2 다회차 글이 같은 날
+    같은 이름을 내놓아 실제로 부딪힙니다.
+    """
+    taken = {row[0] for row in con.execute("SELECT folder FROM event")}
+    if folder not in taken:
+        return folder
+    n = 2
+    while f"{folder}_{n}" in taken:
+        n += 1
+    return f"{folder}_{n}"
+
+
 def save(con, cand, folder):
     """event 행을 만들고 딸린 사진의 event_id를 채웁니다."""
     cur = con.execute(
