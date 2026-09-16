@@ -120,6 +120,25 @@ class TestMatchByHash(unittest.TestCase):
         ).fetchone()
         self.assertEqual(("aaa", "dhash"), row)
 
+    def test_distance_exactly_at_threshold_matches(self):
+        """거리가 정확히 임계값이면 매칭으로 칩니다.
+
+        경계를 테스트로 박아 둡니다. dist 를 threshold + 1 이 아니라 threshold 로
+        "정리" 하면 이 경우가 조용히 탈락하는데, 그대로면 아무도 모릅니다.
+        """
+        fh, fb = self._fetchers(self.local_phash ^ 0b111111)   # 거리 6
+        got = matching.match_by_hash(self.con, "op5321", threshold=6,
+                                     fetch_html=fh, fetch_bytes=fb)
+        self.assertEqual(1, got["맞음"])
+
+    def test_distance_one_over_threshold_does_not_match(self):
+        """거리가 임계값보다 1 크면 매칭이 아닙니다."""
+        fh, fb = self._fetchers(self.local_phash ^ 0b1111111)   # 거리 7
+        got = matching.match_by_hash(self.con, "op5321", threshold=6,
+                                     fetch_html=fh, fetch_bytes=fb)
+        self.assertEqual(0, got["맞음"])
+        self.assertEqual(1, got["없음"])
+
     def test_far_hash_does_not_match(self):
         fh, fb = self._fetchers(~self.local_phash & ((1 << 64) - 1))   # 거리 64
         got = matching.match_by_hash(self.con, "op5321", threshold=6,
