@@ -7,8 +7,10 @@
 
 앱 이름은 references/vocab.md 를 정본으로 옮깁니다. 임의 음차와 직역을 하지 않습니다.
 """
+import os
 import pathlib
 import re
+import shutil
 import subprocess
 
 SS_APP = re.compile(r"^Screenshot_\d{8}[-_]\d{6}_(.+)$")
@@ -125,8 +127,49 @@ def write(path, words, hier_words=None):
     args.append(str(path))
     res = subprocess.run(args, capture_output=True, text=True)
     if res.returncode != 0:
-        raise RuntimeError(f"exiftool 실패: {res.stderr.strip()}")
+        suffix = _real_suffix(res.stderr)
+        if suffix is None:
+            raise RuntimeError(f"exiftool 실패: {res.stderr.strip()}")
+        _write_through_temp(pathlib.Path(path), suffix, args)
     remove_appledouble(path)
+
+
+# "Not a valid PNG (looks more like a JPEG)" 처럼 내용과 확장자가 어긋난다는 말입니다.
+_WRONG_TYPE = re.compile(r"looks more like an? (\w+)")
+_SUFFIX = {"JPEG": ".jpg", "PNG": ".png", "GIF": ".gif", "TIFF": ".tif",
+           "HEIF": ".heic", "WEBP": ".webp", "MP4": ".mp4", "MOV": ".mov"}
+
+
+def _real_suffix(stderr):
+    """exiftool 이 말한 진짜 형식의 확장자입니다. 다른 오류면 None 입니다."""
+    m = _WRONG_TYPE.search(stderr)
+    return _SUFFIX.get(m.group(1).upper()) if m else None
+
+
+def _write_through_temp(path, suffix, args):
+    """확장자가 내용과 다른 파일에 키워드를 씁니다.
+
+    exiftool 은 확장자와 내용이 어긋나면 쓰기를 거부합니다. -m 으로도 안 됩니다
+    (13.55 실측). T7 에 이름만 .PNG 인 JPEG 가 5장 있어 실제로 부딪혔습니다.
+    제대로 된 확장자를 붙인 사본에 쓰고 원본 자리에 되돌려 놓습니다.
+
+    임시 파일을 같은 폴더에 둡니다. os.replace 는 같은 파일시스템 안에서만
+    원자적이라, 다른 곳에 두고 베껴 오면 되돌리는 도중에 죽었을 때 사진이
+    잘립니다. 이름을 점으로 시작해 scan 의 훑기에서 빠지게 합니다.
+    """
+    tmp = path.parent / f".{path.stem}_키워드작업{suffix}"
+    try:
+        shutil.copy(path, tmp)
+        res = subprocess.run(args[:-1] + [str(tmp)], capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"exiftool 실패: {res.stderr.strip()}")
+        os.replace(tmp, path)
+    finally:
+        remove_appledouble(tmp)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def remove_appledouble(path):

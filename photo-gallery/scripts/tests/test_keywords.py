@@ -126,6 +126,26 @@ class TestCollect(unittest.TestCase):
         self.assertEqual(sorted(set(got)), got)
 
 
+class TestRealSuffix(unittest.TestCase):
+    """exiftool 이 "내용이 딴판" 이라고 말한 경우에만 폴백을 씁니다."""
+
+    def test_reads_the_type_exiftool_named(self):
+        self.assertEqual(".jpg", keywords._real_suffix(
+            "Error: Not a valid PNG (looks more like a JPEG) - /x/a.PNG"))
+
+    def test_handles_the_article_an(self):
+        self.assertEqual(".mp4", keywords._real_suffix(
+            "Error: Not a valid MOV (looks more like an MP4) - /x/a.MOV"))
+
+    def test_unrelated_error_is_not_a_mismatch(self):
+        self.assertIsNone(keywords._real_suffix(
+            "Error: File format error - /x/a.jpg"))
+
+    def test_unknown_type_is_not_a_mismatch(self):
+        self.assertIsNone(keywords._real_suffix(
+            "Error: Not a valid JPEG (looks more like a DOCX) - /x/a.jpg"))
+
+
 @unittest.skipUnless(HAS_EXIFTOOL, "exiftool 없음")
 class TestWriteRead(unittest.TestCase):
     def setUp(self):
@@ -175,6 +195,41 @@ class TestWriteRead(unittest.TestCase):
         self.assertFalse((self.root / "._a.jpg").exists())
         self.assertFalse((self.root / "._a.jpg_exiftool_tmp").exists())
         self.assertEqual(["가"], keywords.read(self.root / "a.jpg"))
+
+    def test_writes_to_a_file_whose_extension_lies(self):
+        """이름만 .PNG 인 JPEG 입니다. T7 에 실제로 5장 있습니다.
+
+        exiftool 은 확장자와 내용이 어긋나면 쓰기를 거부하고 -m 으로도 안 됩니다.
+        """
+        liar = self.root / "b.PNG"
+        liar.write_bytes(helpers.jpeg_bytes())
+        keywords.write(liar, ["스크린샷"])
+        self.assertEqual(["스크린샷"], keywords.read(liar))
+
+    def test_a_lying_extension_keeps_the_image_intact(self):
+        """되돌려 놓다가 잘리면 사진이 망가집니다."""
+        liar = self.root / "b.PNG"
+        data = helpers.jpeg_bytes()
+        liar.write_bytes(data)
+        keywords.write(liar, ["스크린샷"])
+        after = liar.read_bytes()
+        self.assertTrue(after.startswith(b"\xff\xd8"), "JPEG 가 아닙니다")
+        self.assertGreaterEqual(len(after), len(data))
+
+    def test_no_work_file_is_left_behind(self):
+        liar = self.root / "b.PNG"
+        liar.write_bytes(helpers.jpeg_bytes())
+        keywords.write(liar, ["스크린샷"])
+        leftovers = [p.name for p in self.root.iterdir()
+                     if "키워드작업" in p.name]
+        self.assertEqual([], leftovers)
+
+    def test_a_real_failure_still_raises(self):
+        """확장자 불일치가 아닌 오류를 조용히 삼키면 안 됩니다."""
+        broken = self.root / "c.jpg"
+        broken.write_bytes(b"this is not an image at all")
+        with self.assertRaises(RuntimeError):
+            keywords.write(broken, ["스크린샷"])
 
     def test_other_files_sidecars_are_left_alone(self):
         """폴더를 쓸어 담으면 안 됩니다. 건드린 그 파일의 짝꿍만 지웁니다."""
