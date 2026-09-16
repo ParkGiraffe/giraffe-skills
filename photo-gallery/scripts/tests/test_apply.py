@@ -51,6 +51,18 @@ class TestApply(unittest.TestCase):
         applymod.run(self.rows, self.base, self.gallery, self.journal)
         self.assertEqual(self.data, (self.gallery / "사진/2026/05/x.jpg").read_bytes())
 
+    def test_copy_does_not_carry_metadata(self):
+        """메타데이터를 복사하면 exFAT 에서 "._이름" 짝꿍 파일이 생깁니다.
+
+        T7 은 exFAT 이라 확장속성을 담을 자리가 없어서, macOS 가 파일마다
+        짝꿍을 만듭니다. 12,693개면 짝꿍도 그만큼이고 윈도우에 꽂으면 다 보입니다.
+        shutil.copy2 가 아니라 copy 여야 합니다.
+        """
+        import inspect, re
+        calls = re.findall(r"shutil\.\w+\(", inspect.getsource(applymod.run))
+        self.assertEqual(["shutil.copy("], calls,
+                         "복사는 shutil.copy 한 곳뿐이어야 합니다")
+
     def test_journal_records_every_row(self):
         path = applymod.run(self.rows, self.base, self.gallery, self.journal)
         rec = json.loads(path.read_text(encoding="utf-8"))

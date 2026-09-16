@@ -57,7 +57,14 @@ def run(rows, base, gallery, journal_dir):
         else:
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
+                # copy2 를 쓰면 안 됩니다. 메타데이터까지 복사하는데 T7 은
+                # exFAT 이라 확장속성을 담을 자리가 없어서, macOS 가 파일마다
+                # "._이름" 짝꿍 파일을 만듭니다. 12,693개면 짝꿍도 그만큼 생기고
+                # 이 디스크를 윈도우에 꽂으면 전부 보입니다.
+                #
+                # 잃는 것은 원본 mtime 뿐인데, 이 프로젝트는 mtime 을 날짜
+                # 출처로 쓰지 않습니다. 촬영시각은 EXIF 와 파일명에서만 옵니다.
+                shutil.copy(src, dst)
             except OSError as exc:
                 # 반쯤 쓰다 만 파일을 남기면 다음 실행이 완성본으로 착각해
                 # 영영 건너뜁니다.
