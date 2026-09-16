@@ -151,6 +151,12 @@ class TestWriteRead(unittest.TestCase):
         keywords.write(self.root / "a.jpg", ["나"])
         self.assertEqual(["나"], keywords.read(self.root / "a.jpg"))
 
+    def test_shrinking_hierarchy_clears_stale_value(self):
+        """계층이 있던 사진이 재기록 때 계층 없음으로 바뀌면 옛 계층이 남으면 안 됩니다."""
+        keywords.write(self.root / "a.jpg", ["포켓몬 GO"], ["포켓몬|포켓몬 GO"])
+        keywords.write(self.root / "a.jpg", ["딸"], [])
+        self.assertEqual([], keywords.read_hierarchy(self.root / "a.jpg"))
+
     def test_no_backup_file_is_left(self):
         keywords.write(self.root / "a.jpg", ["가"])
         self.assertFalse((self.root / "a.jpg_original").exists())
