@@ -12,20 +12,25 @@ import re
 import subprocess
 
 SS_APP = re.compile(r"^Screenshot_\d{8}[-_]\d{6}_(.+)$")
-# 각 칸은 이스케이프된 파이프(\|)를 칸 경계로 잘못 보지 않도록 (\\. 또는 [^|])로 잡는다.
-_ROW = re.compile(r"^\|\s*((?:\\.|[^|])+?)\s*\|\s*((?:\\.|[^|])+?)\s*\|")
 
 
 _HEADERS = {"앱 내부명", "표기", "잎", "계층"}
 
 
 def _table_rows(path):
-    """vocab.md 안의 모든 표 행을 (왼쪽, 오른쪽)으로 돌려줍니다."""
+    """vocab.md 안의 모든 표 행을 (왼쪽, 오른쪽)으로 돌려줍니다.
+
+    정규식으로 칸을 집으면 안 됩니다. 계층 표의 값에 `\\|` 가 들어 있어서
+    `[^|]` 류의 패턴이 백슬래시에서 잘립니다. 이스케이프 안 된 파이프로 나눕니다.
+    """
     for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
-        m = _ROW.match(line.strip())
-        if not m:
+        line = line.strip()
+        if not line.startswith("|") or not line.endswith("|"):
             continue
-        left, right = m.group(1).strip(), m.group(2).strip()
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", line)[1:-1]]
+        if len(cells) < 2:
+            continue
+        left, right = cells[0], cells[1]
         if left in _HEADERS or not right:
             continue
         if set(left) <= set("-: ") or set(right) <= set("-: "):
@@ -105,16 +110,19 @@ def write(path, words, hier_words=None):
     윈도우에 `포켓몬|포켓몬 GO` 라는 이상한 태그가 보입니다.
     원본 백업 파일(`_original`)을 남기지 않습니다.
 
-    한 번의 실행에서 같은 리스트 태그를 `=`(비우기)로 지우고 `+=`로 다시 채우면,
-    이미 값이 있던 파일에서는 지우기가 먹지 않고 옛 값에 새 값이 그냥 덧붙습니다
-    (설치된 exiftool 13.55에서 실측). 그래서 `-sep`로 쪼개는 한 번의 `=` 대입으로
-    통째로 갈아 끼웁니다. 이러면 지우기+추가가 아니라 대입 하나뿐이라 안전합니다.
+    `+=`(추가)가 아니라 평범한 `=`를 단어마다 반복합니다. `+=`를 쓰면 "더하는
+    거니까 맞다"고 되돌리기 쉬운데, 같은 명령에서 `=`(비우기) 뒤에 `+=`를 붙이면
+    이미 값이 있던 파일에서는 비우기가 먹지 않고 옛 값에 새 값이 그냥 덧붙습니다
+    (설치된 exiftool 13.55에서 실측). 리스트 태그에 평범한 `=`를 반복하면 앞의
+    빈 대입이 기존 값을 제대로 지우면서 쌓이므로, 이 방식으로만 재기록이 안전합니다.
     """
     args = ["exiftool", "-overwrite_original", "-charset", "filename=utf8",
-            "-codedcharacterset=utf8", "-sep", "\\n",
-            f"-XMP-dc:Subject={'\\n'.join(words)}",
-            f"-XMP-lr:HierarchicalSubject={'\\n'.join(hier_words or [])}",
-            str(path)]
+            "-codedcharacterset=utf8", "-XMP-dc:Subject=", "-XMP-lr:HierarchicalSubject="]
+    for word in words:
+        args.append(f"-XMP-dc:Subject={word}")
+    for word in (hier_words or []):
+        args.append(f"-XMP-lr:HierarchicalSubject={word}")
+    args.append(str(path))
     res = subprocess.run(args, capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"exiftool 실패: {res.stderr.strip()}")
