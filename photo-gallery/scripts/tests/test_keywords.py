@@ -161,6 +161,27 @@ class TestWriteRead(unittest.TestCase):
         keywords.write(self.root / "a.jpg", ["가"])
         self.assertFalse((self.root / "a.jpg_original").exists())
 
+    def test_appledouble_sidecar_is_removed(self):
+        """exFAT 에서는 exiftool 이 쓸 때마다 "._이름" 짝꿍이 생깁니다.
+
+        macOS 가 com.apple.provenance 확장속성을 붙이는데 exFAT 에 담을 자리가
+        없어서입니다. 그대로 두면 이 디스크를 윈도우에 꽂을 때 전부 보입니다.
+        테스트 임시폴더는 APFS 라 짝꿍이 저절로 생기지 않으므로 직접 만들어
+        둡니다. 지우는 코드가 없으면 그대로 남습니다.
+        """
+        (self.root / "._a.jpg").write_bytes(b"\x00\x05\x16\x07")
+        (self.root / "._a.jpg_exiftool_tmp").write_bytes(b"\x00\x05\x16\x07")
+        keywords.write(self.root / "a.jpg", ["가"])
+        self.assertFalse((self.root / "._a.jpg").exists())
+        self.assertFalse((self.root / "._a.jpg_exiftool_tmp").exists())
+        self.assertEqual(["가"], keywords.read(self.root / "a.jpg"))
+
+    def test_other_files_sidecars_are_left_alone(self):
+        """폴더를 쓸어 담으면 안 됩니다. 건드린 그 파일의 짝꿍만 지웁니다."""
+        (self.root / "._남의파일.jpg").write_bytes(b"\x00\x05\x16\x07")
+        keywords.write(self.root / "a.jpg", ["가"])
+        self.assertTrue((self.root / "._남의파일.jpg").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

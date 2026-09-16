@@ -126,6 +126,27 @@ def write(path, words, hier_words=None):
     res = subprocess.run(args, capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"exiftool 실패: {res.stderr.strip()}")
+    remove_appledouble(path)
+
+
+def remove_appledouble(path):
+    """exiftool 이 남긴 "._이름" 짝꿍 파일을 지웁니다.
+
+    macOS 는 파일을 쓴 프로세스를 기록하려고 com.apple.provenance 확장속성을
+    붙입니다. T7 은 exFAT 이라 확장속성을 담을 자리가 없어서 파일마다 4KB 짜리
+    짝꿍이 생기고, 이 디스크를 윈도우에 꽂으면 전부 보입니다. 이 프로젝트가
+    shutil.copy2 를 금지한 것과 같은 이유입니다.
+
+    -overwrite_original 도 -overwrite_original_in_place 도 이것을 막지
+    못합니다(exiftool 13.55 실측). 그래서 쓰고 나서 치웁니다. 방금 우리가 건드린
+    그 파일의 짝꿍만 지웁니다. 폴더를 쓸어 담지 않습니다.
+    """
+    path = pathlib.Path(path)
+    for name in (f"._{path.name}", f"._{path.name}_exiftool_tmp"):
+        try:
+            (path.parent / name).unlink()
+        except OSError:
+            pass
 
 
 def _read_field(path, field):
