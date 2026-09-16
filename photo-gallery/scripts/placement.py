@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""배치 계획을 만듭니다. 파일을 건드리지 않는 마지막 단계입니다.
+
+디스크의 파일 하나가 계획 한 줄이 됩니다. 같은 내용이 여러 곳에 있으면
+대표 하나만 갤러리로 가고 나머지는 격리함으로 갑니다.
+"""
+import collections
+import datetime as dt
+import os
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import dedup  # noqa: E402
+import naming  # noqa: E402
+import probe  # noqa: E402
+
+QUARANTINE = "_시스템/중복격리"
+
+
+def _parse(value):
+    return dt.datetime.fromisoformat(value) if value else None
+
+
+def build(con, threshold=4):
+    """계획 줄 목록을 돌려줍니다. src 기준으로 정렬돼 있습니다."""
+    photos = {}
+    for row in con.execute(
+            "SELECT p.sha256, p.kind, p.shot_at, p.phash, e.folder"
+            " FROM photo p LEFT JOIN event e ON e.id = p.event_id"):
+        sha, kind, shot, phash, folder = row
+        photos[sha] = {"kind": kind, "shot": _parse(shot),
+                       "phash": probe.phash_from_db(phash), "event": folder}
+
+    files = collections.defaultdict(list)
+    for path, sha in con.execute("SELECT path, sha256 FROM file ORDER BY path"):
+        files[sha].append(path)
+
+    # 지각해시로 묶인 무리에서는 대표 하나만 갤러리로 보냅니다.
+    near_keeper = {}
+    for group in dedup.near_groups(
+            [(sha, meta["phash"]) for sha, meta in photos.items()], threshold):
+        keeper = dedup.pick_keeper(con, group)
+        for sha in group:
+            near_keeper[sha] = keeper
+
+    rows = []
+    for sha, paths in files.items():
+        meta = photos.get(sha)
+        if meta is None:
+            continue
+        keeper = near_keeper.get(sha, sha)
+        for i, path in enumerate(paths):
+            name = os.path.basename(path)
+            if i == 0 and keeper == sha:
+                filename = (naming.normalize_name(name, meta["shot"])
+                            if meta["shot"] else name)
+                dst = naming.destination(meta["kind"], meta["shot"], filename,
+                                         meta["event"])
+                action = "복사"
+            else:
+                dst = f"{QUARANTINE}/{sha[:12]}_{name}"
+                action = "격리"
+            rows.append({"src": path, "dst": dst, "sha256": sha,
+                         "action": action, "kind": meta["kind"],
+                         "event": meta["event"]})
+
+    rows.sort(key=lambda r: r["src"])
+    return resolve_collisions(rows)
+
+
+def resolve_collisions(rows):
+    """같은 목적지에 서로 다른 내용이 오면 _2, _3을 붙입니다."""
+    taken = {}
+    for row in rows:
+        dst = row["dst"]
+        if dst not in taken:
+            taken[dst] = row["sha256"]
+            continue
+        if taken[dst] == row["sha256"]:
+            continue
+        stem, ext = os.path.splitext(dst)
+        n = 2
+        while f"{stem}_{n}{ext}" in taken:
+            n += 1
+        row["dst"] = f"{stem}_{n}{ext}"
+        taken[row["dst"]] = row["sha256"]
+    return rows
+
+
+def validate(rows):
+    """남은 문제 목록입니다. 비어야 적용 단계로 갈 수 있습니다."""
+    problems = []
+    by_dst = collections.defaultdict(set)
+    seen_src = collections.Counter()
+    for row in rows:
+        by_dst[row["dst"]].add(row["sha256"])
+        seen_src[row["src"]] += 1
+    for dst, shas in by_dst.items():
+        if len(shas) > 1:
+            problems.append(f"목적지 충돌: {dst} 에 서로 다른 내용 {len(shas)}개")
+    for src, n in seen_src.items():
+        if n > 1:
+            problems.append(f"출처 중복: {src} 가 {n}번 나옵니다")
+    return problems

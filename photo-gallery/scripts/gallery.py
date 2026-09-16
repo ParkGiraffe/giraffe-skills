@@ -252,6 +252,37 @@ def cmd_event(args):
     return 0
 
 
+def cmd_plan(args):
+    import csv
+    import collections as co
+    import placement
+    con = index.open_db(args.db)
+    rows = placement.build(con, args.threshold)
+    problems = placement.validate(rows)
+
+    with open(args.out, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["action", "src", "dst", "kind", "event", "sha256"])
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k) for k in w.fieldnames})
+
+    print(f"계획 {len(rows)}줄 -> {args.out}")
+    for action, n in co.Counter(r["action"] for r in rows).most_common():
+        print(f"  {action}: {n}")
+    tops = co.Counter(os.path.dirname(r["dst"]).split("/")[0] for r in rows)
+    print("최상위 행선지:")
+    for top, n in tops.most_common():
+        print(f"  {top}: {n}")
+    if problems:
+        print(f"\n문제 {len(problems)}건, 해결 전에는 apply 하지 마십시오:")
+        for m in problems[:20]:
+            print(f"  {m}")
+    else:
+        print("\n문제 없음. 검토 후 apply 로 넘어가십시오.")
+    con.close()
+    return 1 if problems else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="T7 사진 갤러리 도구")
     ap.add_argument("--db", default=str(DB))
@@ -282,6 +313,11 @@ def main(argv=None):
     p = sub.add_parser("event", help="이벤트 후보를 보여줍니다")
     p.add_argument("--save", action="store_true", help="후보를 인덱스에 확정합니다")
     p.set_defaults(func=cmd_event)
+
+    p = sub.add_parser("plan", help="배치 계획을 만들어 CSV로 내놓습니다")
+    p.add_argument("--threshold", type=int, default=4)
+    p.add_argument("--out", default="/tmp/gallery-plan.csv")
+    p.set_defaults(func=cmd_plan)
 
     args = ap.parse_args(argv)
     return args.func(args)
