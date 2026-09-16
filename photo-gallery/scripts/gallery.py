@@ -1,0 +1,492 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""갤러리 CLI. 서브명령을 모읍니다.
+
+    python3 photo-gallery/scripts/gallery.py scan
+"""
+import argparse
+import datetime as dt
+import os
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import apply as apply_mod  # noqa: E402
+import index  # noqa: E402
+import naming  # noqa: E402
+import probe  # noqa: E402
+
+T7 = pathlib.Path("/Volumes/T7")
+GALLERY = T7 / "002_Areas" / "001_사진"
+DB = GALLERY / "_시스템" / "index.sqlite"
+DEFAULT_ROOTS = [GALLERY / "아이폰 12 pro", T7 / "그림" / "카메라 앨범",
+                 GALLERY / "동동이 사진", GALLERY / "운동",
+                 GALLERY / "박기린", GALLERY / "블로그"]
+
+MEDIA_EXT = probe.IMAGE_EXT | probe.VIDEO_EXT
+
+
+def _walk(roots):
+    for root in roots:
+        root = pathlib.Path(root)
+        if not root.exists():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for fn in sorted(filenames):
+                if fn.startswith("."):
+                    continue
+                if os.path.splitext(fn)[1].lower() not in MEDIA_EXT:
+                    continue
+                yield pathlib.Path(dirpath) / fn
+
+
+COMMIT_EVERY = 500
+
+
+def _under(path, base):
+    """path 가 base 안에 있는지 봅니다.
+
+    글자 그대로도, 심볼릭 링크를 따라간 뒤에도 안이어야 합니다. 둘 다 필요합니다.
+    글자 그대로 안이어야 relative_to 로 상대경로를 뽑을 수 있고, 링크를 따라가서도
+    안이어야 인덱스에 적는 상대경로가 실제 파일이 있는 자리를 가리킵니다.
+    """
+    path = pathlib.Path(path)
+    try:
+        if not path.is_relative_to(base):
+            return False
+        return path.resolve().is_relative_to(base.resolve())
+    except (OSError, ValueError):
+        return False
+
+
+def scan(con, roots, base, commit_every=COMMIT_EVERY):
+    """파일을 읽어 인덱스에 넣습니다. 아무것도 옮기거나 고치지 않습니다."""
+    base = pathlib.Path(base)
+    # base 밖 root 는 훑기 전에 막습니다. 인덱스는 경로를 base 기준 상대경로로
+    # 담으므로 담을 자리가 아예 없고, 루프 안에서 relative_to 가 ValueError 로
+    # 터지면 아직 커밋하지 않은 수천 건이 통째로 사라집니다.
+    outside = [str(r) for r in roots if not _under(r, base)]
+    if outside:
+        raise ValueError(
+            f"--base({base}) 밖을 가리키는 --root 가 있어 아무것도 읽지 않았습니다: "
+            f"{outside}")
+
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    known = {r[0] for r in con.execute("SELECT sha256 FROM photo")}
+    stat = {"파일": 0, "새 내용": 0, "같은 내용": 0, "건너뜀": 0}
+
+    for path in _walk(roots):
+        try:
+            digest = probe.sha256_of(path)
+            size = path.stat().st_size
+        except OSError:
+            stat["건너뜀"] += 1
+            continue
+        # relative_to 는 글자만 봅니다. root 가 글자 그대로 base 안이면
+        # os.walk 가 내놓는 경로도 전부 글자 그대로 base 안이라 이 호출은
+        # 실패할 수 없습니다. 위에서 root 를 먼저 거르는 이유입니다.
+        rel = str(path.relative_to(base))
+        stat["파일"] += 1
+
+        if digest in known:
+            stat["같은 내용"] += 1
+        else:
+            exif = probe.read_exif(path)
+            kind = probe.classify(path.name, exif)
+            # 원본 경로를 같이 넘깁니다. EXIF 도 파일명도 없을 때 사용자가 손으로
+            # 정리해 둔 "2024/7월/포켓몬고페스트" 폴더가 마지막 단서입니다.
+            when, src = naming.resolve_datetime(path.name, exif["dt"], str(path))
+            con.execute(
+                "INSERT INTO photo(sha256, path, bytes, width, height, kind, shot_at,"
+                " shot_at_src, make, model, gps_lat, gps_lon, phash, origin, imported_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (digest, rel, size, exif["width"], exif["height"], kind,
+                 when.isoformat(timespec="seconds") if when else None, src,
+                 exif["make"], exif["model"], exif["gps_lat"], exif["gps_lon"],
+                 probe.phash_to_db(probe.dhash(path)), str(path), now))
+            known.add(digest)
+            stat["새 내용"] += 1
+
+        # 파일 행은 언제나 넣습니다. 같은 내용이 여러 곳에 있다는 사실이 남아야
+        # Task 7에서 격리할 대상을 찾을 수 있습니다.
+        #
+        # photo 행보다 반드시 뒤에 넣습니다. file.sha256 이 photo.sha256 을 참조하고
+        # open_db 가 PRAGMA foreign_keys 를 켜 두므로, 처음 보는 내용인데 photo 행이
+        # 아직 없으면 같은 트랜잭션 안이라도 FOREIGN KEY constraint failed 가 납니다.
+        con.execute("INSERT OR REPLACE INTO file(path, sha256, bytes, seen_at)"
+                    " VALUES(?,?,?,?)", (rel, digest, size, now))
+
+        # 중간중간 커밋합니다. 12,693개를 읽는 동안 케이블이 빠지거나 Ctrl+C 가
+        # 들어오면 끝에 한 번만 커밋하는 방식은 읽은 것을 전부 버립니다.
+        if stat["파일"] % commit_every == 0:
+            con.commit()
+
+    con.commit()
+    return stat
+
+
+def cmd_scan(args):
+    con = index.open_db(args.db)
+    roots = [pathlib.Path(r) for r in args.root] if args.root else DEFAULT_ROOTS
+    try:
+        stat = scan(con, roots, args.base)
+    except ValueError as exc:
+        print(exc)
+        con.close()
+        return 1
+    print(f"파일 {stat['파일']}개, 새 내용 {stat['새 내용']}개, "
+          f"같은 내용 {stat['같은 내용']}개, 건너뜀 {stat['건너뜀']}개")
+    files = con.execute("SELECT COUNT(*) FROM file").fetchone()[0]
+    total = con.execute("SELECT COUNT(*) FROM photo").fetchone()[0]
+    print(f"인덱스 파일 {files}개, 고유 내용 {total}개")
+    for kind, n in con.execute("SELECT kind, COUNT(*) FROM photo GROUP BY kind"):
+        print(f"  {kind}: {n}")
+    unknown = con.execute(
+        "SELECT COUNT(*) FROM photo WHERE shot_at IS NULL").fetchone()[0]
+    print(f"  촬영시각 미상: {unknown}")
+    nophash = con.execute(
+        "SELECT COUNT(*) FROM photo WHERE phash IS NULL").fetchone()[0]
+    print(f"  지각해시 없음(중복 판정에서 빠짐): {nophash}")
+    con.close()
+    return 0
+
+
+def cmd_blog(args):
+    import blog as blogmod
+    con = index.open_db(args.db)
+    posts = blogmod.fetch_all(args.blog_id, pages=args.pages)
+    for post in posts:
+        tag, _rest = blogmod.split_tag(post["title"])
+        # INSERT OR REPLACE 를 쓰면 안 됩니다. REPLACE 는 기존 행을 지우고 새로
+        # 넣으므로 VALUES 에 없는 images_collected_at 이 NULL 로 초기화됩니다.
+        # 이 루프는 매 실행마다 758편 전부에 대해 도니까, 바로 아래에서 계산하는
+        # done 이 항상 비어 재개 가능성이 통째로 무력화됩니다.
+        con.execute(
+            "INSERT INTO blog_post(log_no, title, tag, posted_at) VALUES(?,?,?,?)"
+            " ON CONFLICT(log_no) DO UPDATE SET"
+            " title=excluded.title, tag=excluded.tag, posted_at=excluded.posted_at",
+            (post["log_no"], post["title"], tag, post["posted_at"]))
+    con.commit()
+    print(f"글 {len(posts)}편 저장")
+
+    # 이미지가 0개인 글도 "수집 완료" 로 표시해야 재실행 때 다시 받지 않습니다.
+    # blog_image 행 유무로만 판단하면 코드블록만 있는 JS 강의 글 27편이 매번 재수집됩니다.
+    done = {r[0] for r in con.execute(
+        "SELECT log_no FROM blog_post WHERE images_collected_at IS NOT NULL")}
+    todo = [p for p in posts if p["log_no"] not in done]
+    print(f"이미지 수집 대상 {len(todo)}편")
+    for i, post in enumerate(todo, 1):
+        try:
+            names = blogmod.parse_image_names(
+                blogmod.fetch_post_html(args.blog_id, post["log_no"]))
+        except Exception as exc:
+            print(f"  [{i}/{len(todo)}] {post['log_no']} 실패: {exc}")
+            continue
+        con.executemany(
+            "INSERT OR IGNORE INTO blog_image(log_no, filename, match)"
+            " VALUES(?,?,'none')",
+            [(post["log_no"], n) for n in names])
+        con.execute("UPDATE blog_post SET images_collected_at=? WHERE log_no=?",
+                    (dt.datetime.now().isoformat(timespec="seconds"), post["log_no"]))
+        con.commit()
+        if i % 25 == 0:
+            print(f"  [{i}/{len(todo)}] 진행 중")
+    total = con.execute("SELECT COUNT(*) FROM blog_image").fetchone()[0]
+    print(f"발행 이미지 파일명 {total}개")
+    con.close()
+    return 0
+
+
+def cmd_match(args):
+    import matching
+    con = index.open_db(args.db)
+    stat = matching.match_by_name(con)
+    print(f"파일명 매칭: 맞음 {stat['맞음']}, 모호 {stat['모호']}, 없음 {stat['없음']}")
+    if args.hash:
+        h = matching.match_by_hash(con, args.blog_id, args.threshold, limit=args.limit)
+        print(f"지각해시 폴백: 맞음 {h['맞음']}, 없음 {h['없음']}, 실패 {h['실패']}")
+    rows = con.execute(
+        "SELECT p.tag, COUNT(*) FROM blog_image i"
+        " JOIN blog_post p ON p.log_no = i.log_no"
+        " WHERE i.sha256 IS NOT NULL AND p.tag IS NOT NULL"
+        " GROUP BY p.tag ORDER BY 2 DESC LIMIT 20").fetchall()
+    print("매칭된 사진이 많은 태그:")
+    for tag, n in rows:
+        print(f"  {tag}: {n}")
+    con.close()
+    return 0
+
+
+def cmd_dup(args):
+    import dedup
+    con = index.open_db(args.db)
+
+    exact = dedup.exact_groups(con)
+    waste = 0
+    for paths in exact:
+        row = con.execute("SELECT bytes FROM file WHERE path=?", (paths[0],)).fetchone()
+        waste += (row[0] if row else 0) * (len(paths) - 1)
+    print(f"바이트 완전 일치: {len(exact)}그룹, 잉여 {sum(len(g) - 1 for g in exact)}개, "
+          f"{waste / 2**30:.2f}GB")
+
+    rows = [(sha, probe.phash_from_db(v)) for sha, v in
+            con.execute("SELECT sha256, phash FROM photo WHERE phash IS NOT NULL")]
+    near = dedup.near_groups(rows, args.threshold)
+    n_waste = 0
+    for shas in near:
+        keeper = dedup.pick_keeper(con, shas)
+        for sha in shas:
+            if sha == keeper:
+                continue
+            r = con.execute("SELECT bytes FROM photo WHERE sha256=?", (sha,)).fetchone()
+            n_waste += r[0] if r else 0
+    print(f"지각해시 거리 {args.threshold} 이하: {len(near)}그룹, "
+          f"잉여 {sum(len(g) - 1 for g in near)}개, {n_waste / 2**30:.2f}GB")
+
+    print("\n표본 5그룹:")
+    for shas in near[:5]:
+        keeper = dedup.pick_keeper(con, shas)
+        for sha in shas:
+            p_, w, h, b = con.execute(
+                "SELECT path, width, height, bytes FROM photo WHERE sha256=?", (sha,)).fetchone()
+            mark = "남김" if sha == keeper else "격리"
+            print(f"  [{mark}] {w}x{h} {b/1024:.0f}KB  {p_}")
+        print()
+    con.close()
+    return 0
+
+
+def cmd_event(args):
+    import events
+    import naming as nm
+    con = index.open_db(args.db)
+    cands = events.candidates(con)
+    print(f"이벤트 후보 {len(cands)}건\n")
+
+    # 같은 이름이 둘 이상 나오는 후보를 미리 찾아 둡니다. 1/2, 2/2 다회차 글이
+    # 같은 날 같은 이름을 내놓습니다. 사용자가 검토할 때 합칠지 이름을 다르게
+    # 줄지 정해야 하는데, 표시가 없으면 그냥 지나칩니다.
+    names = [nm.event_folder_name(c["day"], c["name"]) for c in cands]
+    dup_names = {n for n in names if names.count(n) > 1}
+
+    for c, base in zip(cands, names):
+        ss = events.screenshots_in_window(con, c["start"], c["end"])
+        mark = "  [이름 중복, 검토 필요]" if base in dup_names else ""
+        print(f"{base}{mark}")
+        if c["start"].date() == c["end"].date():
+            window = f"{c['start']:%H:%M}~{c['end']:%H:%M}"
+        else:
+            window = f"{c['start']:%m-%d %H:%M}~{c['end']:%m-%d %H:%M}"
+        print(f"  사진 {len(c['shas'])}장, 시간창 {window}, "
+              f"창 안 스크린샷 {len(ss)}장")
+        print(f"  원제 {c['title'][:70]}")
+        if args.save:
+            # log_no 를 같이 넘겨야 이 글이 앞서 저장해 둔 이름에 자기가
+            # 비켜 주지 않습니다. 비켜 주면 --save 를 누를 때마다 _2 가 붙습니다.
+            events.save(con, c, events.unique_folder(con, base, c["log_no"]))
+        print()
+    if dup_names:
+        print(f"이름이 겹치는 후보가 {len(dup_names)}건 있습니다. "
+              f"--save 하면 뒤쪽에 _2 가 붙습니다.\n")
+    if args.save:
+        print("인덱스에 저장했습니다.")
+    else:
+        print("확정하려면 --save 를 붙여 다시 실행하십시오.")
+    con.close()
+    return 0
+
+
+def cmd_plan(args):
+    import csv
+    import collections as co
+    import placement
+    con = index.open_db(args.db)
+    rows = placement.build(con, args.threshold)
+    problems = placement.validate(rows)
+
+    with open(args.out, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["action", "src", "dst", "kind", "event", "sha256"])
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k) for k in w.fieldnames})
+
+    print(f"계획 {len(rows)}줄 -> {args.out}")
+    for action, n in co.Counter(r["action"] for r in rows).most_common():
+        print(f"  {action}: {n}")
+    tops = co.Counter(os.path.dirname(r["dst"]).split("/")[0] for r in rows)
+    print("최상위 행선지:")
+    for top, n in tops.most_common():
+        print(f"  {top}: {n}")
+    if problems:
+        print(f"\n문제 {len(problems)}건, 해결 전에는 apply 하지 마십시오:")
+        for m in problems[:20]:
+            print(f"  {m}")
+    else:
+        print("\n문제 없음. 검토 후 apply 로 넘어가십시오.")
+    con.close()
+    return 1 if problems else 0
+
+
+def _read_plan(path):
+    import csv
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def cmd_apply(args):
+    import placement
+    rows = _read_plan(args.plan)
+    problems = placement.validate(rows)
+    if problems:
+        print(f"계획에 문제 {len(problems)}건이 있어 중단합니다:")
+        for m in problems[:20]:
+            print(f"  {m}")
+        return 1
+    gallery = pathlib.Path(args.gallery)
+    print(f"{len(rows)}개를 {gallery} 로 복사합니다. 원본은 지우지 않습니다.")
+    if not args.yes:
+        if input("진행할까요? (yes 입력): ").strip() != "yes":
+            print("취소했습니다.")
+            return 1
+    journal = apply_mod.run(rows, args.base, gallery, gallery / "_시스템" / "작업기록")
+    rec = __import__("json").loads(journal.read_text(encoding="utf-8"))
+    print(f"복사 {len(rec['항목'])}개, 건너뜀 {rec['건너뜀']}개, 실패 {len(rec['실패'])}개")
+    print(f"작업기록: {journal}")
+    print(f"검증: gallery.py verify --journal {journal}")
+    return 0
+
+
+def cmd_verify(args):
+    problems = apply_mod.verify(args.journal, args.base, args.gallery)
+    if problems:
+        print(f"어긋난 항목 {len(problems)}건:")
+        for m in problems[:30]:
+            print(f"  {m}")
+        return 1
+    print("전부 일치합니다.")
+    return 0
+
+
+def cmd_undo(args):
+    n, kept = apply_mod.undo(args.journal, args.gallery)
+    print(f"{n}개를 되돌렸습니다. 원본은 그대로입니다.")
+    if kept:
+        print(f"내용이 달라 남겨 둔 파일 {len(kept)}개입니다. 직접 확인하십시오.")
+        for dst in kept[:10]:
+            print(f"  {dst}")
+    return 0
+
+
+def cmd_keywords(args):
+    import json
+    import keywords as kw
+    con = index.open_db(args.db)
+    vocab_path = pathlib.Path(__file__).resolve().parent.parent / "references" / "vocab.md"
+    vocab = kw.load_vocab(vocab_path)
+    hier = kw.load_hierarchy(vocab_path)
+    rec = json.loads(pathlib.Path(args.journal).read_text(encoding="utf-8"))
+    items = [i for i in rec["항목"] if i.get("action") == "복사"]
+    if args.limit:
+        items = items[:args.limit]
+
+    gallery = pathlib.Path(args.gallery)
+    # 하나라도 쓰기 전에 전 항목을 먼저 검사합니다. exiftool 은 원본을 그 자리에서
+    # 고치므로, 갤러리 밖을 가리키는 항목이 하나라도 있으면 원본 사진에 키워드가
+    # 박힙니다. 작업기록은 사람이 고칠 수 있는 평문 JSON 입니다.
+    outside = [i["dst"] for i in items if not apply_mod._inside(gallery / i["dst"], gallery)]
+    if outside:
+        print(f"갤러리 밖을 가리키는 항목이 {len(outside)}개 있어 아무것도 쓰지 않았습니다.")
+        for d in outside[:5]:
+            print(f"  {d}")
+        con.close()
+        return 1
+
+    written = empty = failed = 0
+    for i, item in enumerate(items, 1):
+        words = kw.collect(con, item.get("sha256"), vocab)
+        if not words:
+            empty += 1
+            continue
+        try:
+            kw.write(gallery / item["dst"], words, kw.hierarchical(words, hier))
+            written += 1
+        except RuntimeError as exc:
+            failed += 1
+            if failed <= 5:
+                print(f"  실패 {item['dst']}: {exc}")
+        if i % 500 == 0:
+            print(f"  [{i}/{len(items)}] 진행 중")
+    print(f"키워드 기록 {written}개, 붙일 게 없음 {empty}개, 실패 {failed}개")
+    con.close()
+    # 실패가 하나라도 있으면 0 을 돌려주지 않습니다. "한 장도 못 썼을 때만"
+    # 으로 문턱을 두면 1,000장 실패에 1장 성공이 성공으로 넘어갑니다. 실패 수는
+    # 위에 찍히므로 사람이 보고 판단하면 됩니다.
+    return 1 if failed else 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="T7 사진 갤러리 도구")
+    ap.add_argument("--db", default=str(DB))
+    ap.add_argument("--base", default=str(T7))
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("scan", help="파일을 읽어 인덱스에 넣습니다 (읽기 전용)")
+    p.add_argument("--root", action="append", help="훑을 폴더. 여러 번 줄 수 있습니다")
+    p.set_defaults(func=cmd_scan)
+
+    p = sub.add_parser("blog", help="블로그 글과 발행 이미지 파일명을 인덱스에 넣습니다")
+    p.add_argument("--blog-id", default="op5321")
+    p.add_argument("--pages", type=int, default=30)
+    p.set_defaults(func=cmd_blog)
+
+    p = sub.add_parser("match", help="블로그 이미지와 로컬 사진을 잇습니다")
+    p.add_argument("--hash", action="store_true",
+                   help="파일명으로 못 찾은 것을 지각해시로 다시 시도합니다 (네트워크)")
+    p.add_argument("--blog-id", default="op5321")
+    p.add_argument("--threshold", type=int, default=6)
+    p.add_argument("--limit", type=int, default=0)
+    p.set_defaults(func=cmd_match)
+
+    p = sub.add_parser("dup", help="중복 후보를 보여줍니다 (파일을 옮기지 않습니다)")
+    p.add_argument("--threshold", type=int, default=4)
+    p.set_defaults(func=cmd_dup)
+
+    p = sub.add_parser("event", help="이벤트 후보를 보여줍니다")
+    p.add_argument("--save", action="store_true", help="후보를 인덱스에 확정합니다")
+    p.set_defaults(func=cmd_event)
+
+    p = sub.add_parser("plan", help="배치 계획을 만들어 CSV로 내놓습니다")
+    p.add_argument("--threshold", type=int, default=4)
+    p.add_argument("--out", default="/tmp/gallery-plan.csv")
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("apply", help="계획대로 복사합니다 (원본은 남습니다)")
+    p.add_argument("--plan", default="/tmp/gallery-plan.csv")
+    p.add_argument("--gallery", default=str(GALLERY))
+    p.add_argument("--yes", action="store_true", help="확인 없이 진행합니다")
+    p.set_defaults(func=cmd_apply)
+
+    p = sub.add_parser("verify", help="복사본을 원본과 해시로 대조합니다")
+    p.add_argument("--journal", required=True)
+    p.add_argument("--gallery", default=str(GALLERY))
+    p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("undo", help="작업기록 한 건을 되돌립니다")
+    p.add_argument("--journal", required=True)
+    p.add_argument("--gallery", default=str(GALLERY))
+    p.set_defaults(func=cmd_undo)
+
+    p = sub.add_parser("keywords", help="복사본에 XMP 키워드를 씁니다")
+    p.add_argument("--gallery", default=str(GALLERY))
+    p.add_argument("--journal", required=True)
+    p.add_argument("--limit", type=int, default=0, help="0이면 전부")
+    p.set_defaults(func=cmd_keywords)
+
+    args = ap.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

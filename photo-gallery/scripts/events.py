@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""블로그 매칭 결과에서 이벤트 후보와 시간창을 뽑습니다.
+
+발행일을 행사일로 쓰지 않습니다. 실측에서 성수 메가페스타 1차는 방문이 5월 1일,
+발행이 5월 2일이었습니다. 날짜는 매칭된 사진의 EXIF에서 가져오고 블로그는 이름만 줍니다.
+"""
+import datetime as dt
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import blog  # noqa: E402
+
+
+def _parse(value):
+    return dt.datetime.fromisoformat(value) if value else None
+
+
+def window(shots, margin_minutes=30):
+    """사진들을 감싸는 시간창. 앞뒤로 여유를 둡니다."""
+    margin = dt.timedelta(minutes=margin_minutes)
+    return min(shots) - margin, max(shots) + margin
+
+
+def candidates(con, max_span_days=3, min_photos=3):
+    """매칭된 사진이 시간적으로 뭉친 글만 행사 후보로 봅니다.
+
+    게임 공략글은 스크린샷이 몇 달에 걸쳐 있어 여기서 걸러집니다.
+    """
+    rows = con.execute(
+        "SELECT i.log_no, p.title, i.sha256, ph.shot_at"
+        " FROM blog_image i"
+        " JOIN blog_post p ON p.log_no = i.log_no"
+        " JOIN photo ph ON ph.sha256 = i.sha256"
+        " WHERE i.sha256 IS NOT NULL AND ph.shot_at IS NOT NULL"
+        " ORDER BY i.log_no, ph.shot_at").fetchall()
+
+    grouped = {}
+    for log_no, title, sha, shot in rows:
+        entry = grouped.setdefault(log_no, {"title": title, "shas": [], "shots": []})
+        entry["shas"].append(sha)
+        entry["shots"].append(_parse(shot))
+
+    out = []
+    for log_no, entry in grouped.items():
+        shots = [s for s in entry["shots"] if s]
+        if len(shots) < min_photos:
+            continue
+        if (max(shots) - min(shots)) > dt.timedelta(days=max_span_days):
+            continue
+        start, end = window(shots)
+        out.append({"log_no": log_no,
+                    "title": entry["title"],
+                    "name": blog.event_name(entry["title"]),
+                    "shas": entry["shas"],
+                    "start": start,
+                    "end": end,
+                    "day": min(shots)})
+    out.sort(key=lambda c: c["day"])
+    return out
+
+
+def screenshots_in_window(con, start, end):
+    """시간창 안의 스크린샷. 사람이 눈으로 보고 행사 소속을 정할 대상입니다."""
+    return con.execute(
+        "SELECT sha256, path, shot_at FROM photo"
+        " WHERE kind='스크린샷' AND shot_at IS NOT NULL"
+        " AND shot_at >= ? AND shot_at <= ? ORDER BY shot_at",
+        (start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds"))).fetchall()
+
+
+def unique_folder(con, folder, log_no=None):
+    """이미 쓰인 폴더명이면 _2, _3 을 붙입니다.
+
+    event.folder 에 UNIQUE 가 걸려 있습니다. 1/2, 2/2 다회차 글이 같은 날 같은
+    이름을 내놓아 실제로 부딪힙니다.
+
+    log_no 를 주면 그 글이 앞서 저장해 둔 이름은 "이미 쓰인 것" 으로 보지
+    않습니다. 자기 이름에 비켜 주면 event --save 를 누를 때마다 _2, _3, _4 가
+    붙습니다. 이 파이프라인은 이름을 고쳐 다시 저장하는 것을 전제로 합니다.
+    """
+    taken = {row[0] for row in con.execute("SELECT folder, log_no FROM event")
+             if log_no is None or row[1] != log_no}
+    if folder not in taken:
+        return folder
+    n = 2
+    while f"{folder}_{n}" in taken:
+        n += 1
+    return f"{folder}_{n}"
+
+
+def save(con, cand, folder):
+    """event 행을 만들고 딸린 사진의 event_id를 채웁니다.
+
+    같은 글에서 나온 후보는 행을 새로 만들지 않고 갱신합니다. INSERT OR REPLACE
+    를 쓰면 안 됩니다. REPLACE 는 앞 행을 지우고 새 id 로 다시 넣으므로, event
+    --save 를 두 번 누르면 이벤트가 두 배가 되고 사진이 새 행으로 옮겨 붙어
+    앞 행은 사진 없는 고아가 됩니다. 실제 규모로는 고아 48개와 옮겨 붙은 사진
+    1,509장입니다.
+
+    이미 붙어 있던 사진을 떼지 않습니다. 사람이 눈으로 보고 붙인 스크린샷은
+    후보의 사진 목록에 없어서, 떼면 그 판단이 통째로 날아갑니다.
+    """
+    row = None
+    if cand["log_no"] is not None:
+        row = con.execute("SELECT id FROM event WHERE log_no=?",
+                          (cand["log_no"],)).fetchone()
+    if row is None:
+        row = con.execute("SELECT id FROM event WHERE folder=?", (folder,)).fetchone()
+
+    start = cand["start"].isoformat(timespec="seconds")
+    end = cand["end"].isoformat(timespec="seconds")
+    if row is None:
+        cur = con.execute(
+            "INSERT INTO event(folder, name, start_at, end_at, log_no)"
+            " VALUES(?,?,?,?,?)", (folder, cand["name"], start, end, cand["log_no"]))
+        eid = cur.lastrowid
+    else:
+        eid = row[0]
+        con.execute(
+            "UPDATE event SET folder=?, name=?, start_at=?, end_at=?, log_no=?"
+            " WHERE id=?", (folder, cand["name"], start, end, cand["log_no"], eid))
+    con.executemany("UPDATE photo SET event_id=? WHERE sha256=?",
+                    [(eid, sha) for sha in cand["shas"]])
+    con.commit()
+    return eid
+
+
+def assign(con, event_id, shas):
+    """사람이 판정한 사진(주로 스크린샷)을 이벤트에 붙입니다.
+
+    앱 이름으로 자동 판정하지 않습니다. 같은 날 인스타그램 스크린샷처럼 행사와
+    무관한 것이 섞이기 때문입니다. 스펙 7.3절.
+    """
+    cur = con.executemany("UPDATE photo SET event_id=? WHERE sha256=?",
+                          [(event_id, sha) for sha in shas])
+    con.commit()
+    return cur.rowcount if cur.rowcount is not None else len(shas)
+
+
+def unassign(con, shas):
+    """잘못 붙인 것을 뗍니다."""
+    cur = con.executemany("UPDATE photo SET event_id=NULL WHERE sha256=?",
+                          [(sha,) for sha in shas])
+    con.commit()
+    return cur.rowcount if cur.rowcount is not None else len(shas)
