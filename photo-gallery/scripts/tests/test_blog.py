@@ -39,6 +39,16 @@ class TestPostList(unittest.TestCase):
                   '+%EC%84%B1%EC%88%98","categoryNo":"1","addDate":"2026. 5. 1."}')
         self.assertEqual("[포켓몬] 성수", blog.parse_post_list(sample)[0]["title"])
 
+    def test_html_entities_are_unescaped(self):
+        """제목에 &#39; 가 그대로 오는 글이 758편 중 22편 있습니다.
+
+        이 제목이 이벤트 폴더 이름이 되므로 풀어야 합니다.
+        """
+        sample = ('{"logNo":"1","title":"%5B%EB%8B%88%EC%BC%80%5D+%26%2339%3B'
+                  '%EC%95%84%EB%8B%88%EC%8A%A4%26%2339%3B","categoryNo":"1",'
+                  '"addDate":"2026. 1. 2."}')
+        self.assertEqual("[니케] '아니스'", blog.parse_post_list(sample)[0]["title"])
+
     def test_fixture_titles_are_decoded(self):
         titles = [p["title"] for p in blog.parse_post_list(self.text)]
         self.assertFalse(any("%" in t for t in titles))

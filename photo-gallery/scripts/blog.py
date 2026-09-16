@@ -7,6 +7,7 @@
 
 JSON은 invalid escape 때문에 json.loads가 깨집니다. 정규식으로 파싱합니다.
 """
+import html
 import os
 import re
 import time
@@ -36,8 +37,11 @@ def parse_post_list(text):
         if log_no in seen:
             continue
         seen.add(log_no)
+        # unquote_plus 다음에 html.unescape 를 한 번 더 겁니다. 제목에 &#39; 같은
+        # HTML 엔티티가 그대로 들어오는 글이 758편 중 22편 있습니다. 이 제목이
+        # 이벤트 폴더 이름이 되므로 풀지 않으면 폴더명에 &#39; 가 박힙니다.
         out.append({"log_no": log_no,
-                    "title": urllib.parse.unquote_plus(title),
+                    "title": html.unescape(urllib.parse.unquote_plus(title)),
                     "posted_at": added})
     return out
 
