@@ -142,12 +142,18 @@ class TestUniqueFolder(TestDb):
         self.assertEqual("20260530_띵조페스티벌 2026_2",
                          events.unique_folder(self.con, "20260530_띵조페스티벌 2026"))
 
-    def test_third_collision_gets_three(self):
-        for suffix in ("", "_2"):
+    def test_many_collisions_need_a_real_loop(self):
+        """증가가 두 번 이상 필요한 경우를 넣습니다.
+
+        미리 채운 이름이 둘뿐이면 증가가 한 번이면 끝나서, while 을 단일 if 로
+        바꿔도 통과합니다. 그러면 1/3 2/3 3/3 처럼 같은 날 세 편이 나올 때
+        조용히 깨집니다. 셋을 채워 두 번 돌게 만듭니다.
+        """
+        for suffix in ("", "_2", "_3"):
             self.con.execute("INSERT INTO event(folder, name, start_at, end_at)"
                              " VALUES(?,'x','s','e')", ("20260530_행사" + suffix,))
         self.con.commit()
-        self.assertEqual("20260530_행사_3",
+        self.assertEqual("20260530_행사_4",
                          events.unique_folder(self.con, "20260530_행사"))
 
 
