@@ -83,6 +83,21 @@ class TestEventName(unittest.TestCase):
         self.assertEqual("포켓몬 메가페스타 in 성수",
                          blog.event_name("포켓몬 메가페스타 in 성수.. 오픈 하루만에 입장 중단!!!!"))
 
+    def test_drops_slash_subtitle(self):
+        """이 블로그는 부제 구분자로 콜론뿐 아니라 슬래시도 씁니다."""
+        self.assertEqual(
+            "생애 첫 국전",
+            blog.event_name("[국전 탐방] 생애 첫 국전 방문기 / 피규어와 가챠샵 털기 / 2026.01"))
+        self.assertEqual(
+            "두찜 콜라보 아크릴 키링 세트",
+            blog.event_name("[니케 굿즈] 두찜 콜라보 아크릴 키링 세트 / 흑련과 '드'로시(도로시)"))
+
+    def test_keeps_slash_inside_word(self):
+        """공백 없이 붙은 슬래시는 한 단어의 일부일 수 있어 자르지 않습니다."""
+        self.assertEqual(
+            "집 앞마당/집터 꾸미기",
+            blog.event_name("[모동숲 섬꾸 - 야외] 집 앞마당/집터 꾸미기"))
+
 
 class TestImageNames(unittest.TestCase):
     def setUp(self):
