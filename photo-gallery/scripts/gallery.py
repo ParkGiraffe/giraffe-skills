@@ -214,6 +214,30 @@ def cmd_dup(args):
     return 0
 
 
+def cmd_event(args):
+    import events
+    import naming as nm
+    con = index.open_db(args.db)
+    cands = events.candidates(con)
+    print(f"이벤트 후보 {len(cands)}건\n")
+    for c in cands:
+        folder = nm.event_folder_name(c["day"], c["name"])
+        ss = events.screenshots_in_window(con, c["start"], c["end"])
+        print(f"{folder}")
+        print(f"  사진 {len(c['shas'])}장, 시간창 {c['start']:%H:%M}~{c['end']:%H:%M}, "
+              f"창 안 스크린샷 {len(ss)}장")
+        print(f"  원제 {c['title'][:70]}")
+        if args.save:
+            events.save(con, c, folder)
+        print()
+    if args.save:
+        print("인덱스에 저장했습니다.")
+    else:
+        print("확정하려면 --save 를 붙여 다시 실행하십시오.")
+    con.close()
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="T7 사진 갤러리 도구")
     ap.add_argument("--db", default=str(DB))
@@ -240,6 +264,10 @@ def main(argv=None):
     p = sub.add_parser("dup", help="중복 후보를 보여줍니다 (파일을 옮기지 않습니다)")
     p.add_argument("--threshold", type=int, default=4)
     p.set_defaults(func=cmd_dup)
+
+    p = sub.add_parser("event", help="이벤트 후보를 보여줍니다")
+    p.add_argument("--save", action="store_true", help="후보를 인덱스에 확정합니다")
+    p.set_defaults(func=cmd_event)
 
     args = ap.parse_args(argv)
     return args.func(args)
