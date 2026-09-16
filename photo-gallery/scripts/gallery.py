@@ -175,6 +175,45 @@ def cmd_match(args):
     return 0
 
 
+def cmd_dup(args):
+    import dedup
+    con = index.open_db(args.db)
+
+    exact = dedup.exact_groups(con)
+    waste = 0
+    for paths in exact:
+        row = con.execute("SELECT bytes FROM file WHERE path=?", (paths[0],)).fetchone()
+        waste += (row[0] if row else 0) * (len(paths) - 1)
+    print(f"바이트 완전 일치: {len(exact)}그룹, 잉여 {sum(len(g) - 1 for g in exact)}개, "
+          f"{waste / 2**30:.2f}GB")
+
+    rows = [(sha, probe.phash_from_db(v)) for sha, v in
+            con.execute("SELECT sha256, phash FROM photo WHERE phash IS NOT NULL")]
+    near = dedup.near_groups(rows, args.threshold)
+    n_waste = 0
+    for shas in near:
+        keeper = dedup.pick_keeper(con, shas)
+        for sha in shas:
+            if sha == keeper:
+                continue
+            r = con.execute("SELECT bytes FROM photo WHERE sha256=?", (sha,)).fetchone()
+            n_waste += r[0] if r else 0
+    print(f"지각해시 거리 {args.threshold} 이하: {len(near)}그룹, "
+          f"잉여 {sum(len(g) - 1 for g in near)}개, {n_waste / 2**30:.2f}GB")
+
+    print("\n표본 5그룹:")
+    for shas in near[:5]:
+        keeper = dedup.pick_keeper(con, shas)
+        for sha in shas:
+            p_, w, h, b = con.execute(
+                "SELECT path, width, height, bytes FROM photo WHERE sha256=?", (sha,)).fetchone()
+            mark = "남김" if sha == keeper else "격리"
+            print(f"  [{mark}] {w}x{h} {b/1024:.0f}KB  {p_}")
+        print()
+    con.close()
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="T7 사진 갤러리 도구")
     ap.add_argument("--db", default=str(DB))
@@ -197,6 +236,10 @@ def main(argv=None):
     p.add_argument("--threshold", type=int, default=6)
     p.add_argument("--limit", type=int, default=0)
     p.set_defaults(func=cmd_match)
+
+    p = sub.add_parser("dup", help="중복 후보를 보여줍니다 (파일을 옮기지 않습니다)")
+    p.add_argument("--threshold", type=int, default=4)
+    p.set_defaults(func=cmd_dup)
 
     args = ap.parse_args(argv)
     return args.func(args)
