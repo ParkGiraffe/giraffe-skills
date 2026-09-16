@@ -8,6 +8,7 @@ import datetime as dt
 import pathlib
 import sys
 import unittest
+import unicodedata as ud
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -78,10 +79,17 @@ class TestResolveDatetime(unittest.TestCase):
         self.assertEqual("unknown", src)
 
     def test_mtime_is_never_used(self):
-        """파일 mtime을 받는 인자가 아예 없어야 합니다."""
+        """파일 시각을 받는 인자가 아예 없어야 합니다.
+
+        받을 수 있게 열어 두면 언젠가 씁니다. mtime 은 복사와 이동으로 이미
+        오염됐습니다. 허용 목록으로 잠급니다. origin 은 경로일 뿐 시각이
+        아니어서 들어와도 됩니다.
+        """
         import inspect
-        self.assertEqual(["basename", "exif_dt"],
-                         list(inspect.signature(naming.resolve_datetime).parameters))
+        allowed = {"basename", "exif_dt", "origin"}
+        params = set(inspect.signature(naming.resolve_datetime).parameters)
+        self.assertEqual(set(), params - allowed,
+                         "날짜 출처가 될 수 있는 인자가 새로 들어왔습니다")
 
     def test_bad_exif_falls_back_to_filename(self):
         got, src = naming.resolve_datetime("20181121_180959.jpg", "0000:00:00 00:00:00")
@@ -175,6 +183,175 @@ class TestEventFolderName(unittest.TestCase):
     def test_strips_path_separators(self):
         self.assertEqual("20260501_A B",
                          naming.event_folder_name(dt.datetime(2026, 5, 1), "A/B"))
+
+
+class TestEpochAndDateOnly(unittest.TestCase):
+    """카카오톡과 몇몇 앱은 받은 시각을 13자리 밀리초로 이름에 박습니다."""
+
+    def test_kakao_epoch_millis(self):
+        got, src = naming.resolve_datetime("kakaotalk_1545297538011.mp4", None)
+        self.assertEqual("filename", src)
+        self.assertEqual(dt.datetime(2018, 12, 20, 18, 18, 58), got)
+
+    def test_epoch_millis_with_suffix(self):
+        got, src = naming.resolve_datetime("1745920032694_100.PNG", None)
+        self.assertEqual("filename", src)
+        self.assertEqual(dt.datetime(2025, 4, 29, 18, 47, 12), got)
+
+    def test_a_long_number_that_is_not_a_time_is_ignored(self):
+        """0204160954458243256257 같은 이름을 시각으로 읽으면 안 됩니다."""
+        got, src = naming.resolve_datetime("0204160954458243256257.jpg", None)
+        self.assertIsNone(got)
+        self.assertEqual("unknown", src)
+
+    def test_epoch_outside_the_plausible_range_is_ignored(self):
+        got, _src = naming.resolve_datetime("1000000000000.jpg", None)
+        self.assertIsNotNone(got)
+        got, src = naming.resolve_datetime("9999999999999.jpg", None)
+        self.assertIsNone(got)
+
+    def test_date_only_filename(self):
+        got, src = naming.resolve_datetime("Selfie_20240529_박기린퍼_000.jpg", None)
+        self.assertEqual(naming.FILENAME_DATE, src)
+        self.assertEqual(dt.datetime(2024, 5, 29), got)
+
+    def test_date_only_keeps_the_real_day(self):
+        name = naming.normalize_name("Selfie_20240529_박기린퍼_000.jpg",
+                                     dt.datetime(2024, 5, 29), naming.FILENAME_DATE)
+        self.assertTrue(name.startswith("20240529_000000_"), name)
+
+    def test_impossible_date_is_not_read(self):
+        got, src = naming.resolve_datetime("x_20241345_y.jpg", None)
+        self.assertIsNone(got)
+
+    def test_full_timestamp_still_wins(self):
+        """같은 이름에 둘 다 있으면 시각까지 있는 쪽을 씁니다."""
+        got, src = naming.resolve_datetime("20181121_180959.jpg", None)
+        self.assertEqual("filename", src)
+        self.assertEqual(dt.datetime(2018, 11, 21, 18, 9, 59), got)
+
+
+class TestOriginFolder(unittest.TestCase):
+    """EXIF 도 파일명도 없으면 원본이 놓여 있던 폴더를 봅니다.
+
+    사용자가 손으로 "2024/7월/포켓몬고페스트" 처럼 정리해 둔 경로라 mtime 과
+    달리 복사로 오염되지 않습니다. 미상날짜 602장 중 539장이 여기서 살아납니다.
+    """
+
+    def test_year_and_korean_month(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1234.jpg", None, "/T7/사진/아이폰 12 pro/2024/7월/포켓몬고페스트/IMG_1234.jpg")
+        self.assertEqual(naming.FOLDER_MONTH, src)
+        self.assertEqual((2024, 7), (got.year, got.month))
+
+    def test_year_and_two_digit_month(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1.jpg", None, "/T7/사진/아이폰 12 pro/2025/02/IMG_1.jpg")
+        self.assertEqual(naming.FOLDER_MONTH, src)
+        self.assertEqual((2025, 2), (got.year, got.month))
+
+    def test_year_only(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1.jpg", None, "/T7/사진/아이폰 12 pro/2023/IMG_1.jpg")
+        self.assertEqual(naming.FOLDER_YEAR, src)
+        self.assertEqual(2023, got.year)
+
+    def test_nfd_month_folder(self):
+        """exFAT 은 "7월" 도 NFD 로 돌려줍니다."""
+        origin = ud.normalize("NFD", "/T7/아이폰 12 pro/2024/7월/IMG_1.jpg")
+        got, src = naming.resolve_datetime("IMG_1.jpg", None, origin)
+        self.assertEqual(naming.FOLDER_MONTH, src)
+        self.assertEqual((2024, 7), (got.year, got.month))
+
+    def test_no_year_in_path(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1.jpg", None, "/T7/사진/동동이 사진/IMG_1.jpg")
+        self.assertIsNone(got)
+        self.assertEqual("unknown", src)
+
+    def test_exif_still_wins_over_the_folder(self):
+        """폴더는 월까지뿐입니다. EXIF 가 있으면 그것이 정확합니다."""
+        got, src = naming.resolve_datetime(
+            "IMG_1.jpg", "2024:03:16 19:30:21", "/T7/아이폰 12 pro/2020/1월/IMG_1.jpg")
+        self.assertEqual("exif", src)
+        self.assertEqual(dt.datetime(2024, 3, 16, 19, 30, 21), got)
+
+    def test_filename_still_wins_over_the_folder(self):
+        got, src = naming.resolve_datetime(
+            "20181121_180959.jpg", None, "/T7/아이폰 12 pro/2020/1월/20181121_180959.jpg")
+        self.assertEqual("filename", src)
+        self.assertEqual(dt.datetime(2018, 11, 21, 18, 9, 59), got)
+
+    def test_a_folder_that_is_not_a_year_is_ignored(self):
+        got, src = naming.resolve_datetime(
+            "IMG_1.jpg", None, "/T7/1999년기록/13월/IMG_1.jpg")
+        self.assertIsNone(got)
+
+
+class TestMonthOnlyStamp(unittest.TestCase):
+    """날짜를 모르면 그 자리를 00 으로 둡니다. 없는 날을 지어내지 않습니다."""
+
+    def test_month_only_name(self):
+        got = naming.normalize_name(
+            "IMG_1234.jpg", dt.datetime(2024, 7, 1), naming.FOLDER_MONTH)
+        self.assertEqual("20240700_000000_IMG_1234.jpg", got)
+
+    def test_year_only_name(self):
+        got = naming.normalize_name(
+            "IMG_1.jpg", dt.datetime(2023, 1, 1), naming.FOLDER_YEAR)
+        self.assertEqual("20230000_000000_IMG_1.jpg", got)
+
+    def test_exact_date_is_unchanged(self):
+        got = naming.normalize_name("IMG_1.jpg", dt.datetime(2024, 7, 11, 9, 30, 12))
+        self.assertEqual("20240711_093012_IMG_1.jpg", got)
+
+    def test_month_only_sorts_after_nothing_in_that_month(self):
+        """이름만으로 시간순 정렬되는 성질이 유지돼야 합니다."""
+        names = sorted([
+            naming.normalize_name("b.jpg", dt.datetime(2024, 7, 11, 9, 30, 12)),
+            naming.normalize_name("a.jpg", dt.datetime(2024, 7, 1), naming.FOLDER_MONTH),
+            naming.normalize_name("c.jpg", dt.datetime(2024, 8, 2, 1, 0, 0)),
+        ])
+        self.assertEqual(["20240700_000000_a.jpg", "20240711_093012_b.jpg",
+                          "20240802_010000_c.jpg"], names)
+
+    def test_month_only_goes_to_its_month_folder(self):
+        got = naming.destination("사진", dt.datetime(2024, 7, 1),
+                                 "20240700_000000_IMG_1.jpg", src=naming.FOLDER_MONTH)
+        self.assertEqual("사진/2024/07/20240700_000000_IMG_1.jpg", got)
+
+    def test_year_only_stays_in_the_unknown_folder(self):
+        """월을 모르면 월 폴더를 정할 수 없습니다. 01 에서 12 만 씁니다."""
+        got = naming.destination("사진", dt.datetime(2023, 1, 1),
+                                 "20230000_000000_IMG_1.jpg", src=naming.FOLDER_YEAR)
+        self.assertEqual("_시스템/미상날짜/20230000_000000_IMG_1.jpg", got)
+
+
+class TestNfdFilenames(unittest.TestCase):
+    """exFAT 은 한글 파일명을 NFD 로 돌려줍니다.
+
+    이 파일의 정규식에 든 "오전|오후" 와 "스크린샷" 은 NFC 라, 정규화하지
+    않으면 맥 스크린샷 이름이 하나도 안 맞습니다. 실제로 10장이 통째로
+    미상날짜로 갔습니다.
+    """
+
+    def test_ampm_screenshot_in_nfd(self):
+        nfd = ud.normalize("NFD", "스크린샷 2024-11-04 오후 10.24.12.png")
+        when, src = naming.resolve_datetime(nfd, None)
+        self.assertEqual("filename", src)
+        self.assertEqual(dt.datetime(2024, 11, 4, 22, 24, 12), when)
+
+    def test_nfc_and_nfd_agree(self):
+        nfc = "스크린샷 2024-12-26 오전 5.22.13.png"
+        nfd = ud.normalize("NFD", nfc)
+        self.assertNotEqual(nfc, nfd, "시험할 값이 NFD 로 달라야 합니다")
+        self.assertEqual(naming.resolve_datetime(nfc, None),
+                         naming.resolve_datetime(nfd, None))
+
+    def test_normalize_name_handles_nfd(self):
+        nfd = ud.normalize("NFD", "스크린샷 2024-11-04 오후 10.24.12.png")
+        got = naming.normalize_name(nfd, dt.datetime(2024, 11, 4, 22, 24, 12))
+        self.assertEqual("20241104_222412_스크린샷.png", ud.normalize("NFC", got))
 
 
 if __name__ == "__main__":

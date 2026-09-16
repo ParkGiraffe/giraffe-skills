@@ -28,10 +28,10 @@ def build(con, threshold=4):
     """계획 줄 목록을 돌려줍니다. src 기준으로 정렬돼 있습니다."""
     photos = {}
     for row in con.execute(
-            "SELECT p.sha256, p.kind, p.shot_at, p.phash, e.folder"
+            "SELECT p.sha256, p.kind, p.shot_at, p.shot_at_src, p.phash, e.folder"
             " FROM photo p LEFT JOIN event e ON e.id = p.event_id"):
-        sha, kind, shot, phash, folder = row
-        photos[sha] = {"kind": kind, "shot": _parse(shot),
+        sha, kind, shot, shot_src, phash, folder = row
+        photos[sha] = {"kind": kind, "shot": _parse(shot), "src": shot_src or "exif",
                        "phash": probe.phash_from_db(phash), "event": folder}
 
     files = collections.defaultdict(list)
@@ -63,10 +63,10 @@ def build(con, threshold=4):
         for i, path in enumerate(paths):
             name = os.path.basename(path)
             if i == 0 and keeper == sha:
-                filename = (naming.normalize_name(name, meta["shot"])
+                filename = (naming.normalize_name(name, meta["shot"], meta["src"])
                             if meta["shot"] else name)
                 dst = naming.destination(meta["kind"], meta["shot"], filename,
-                                         meta["event"])
+                                         meta["event"], meta["src"])
                 action = "복사"
             else:
                 dst = f"{QUARANTINE}/{sha[:12]}_{name}"

@@ -95,7 +95,9 @@ def scan(con, roots, base, commit_every=COMMIT_EVERY):
         else:
             exif = probe.read_exif(path)
             kind = probe.classify(path.name, exif)
-            when, src = naming.resolve_datetime(path.name, exif["dt"])
+            # 원본 경로를 같이 넘깁니다. EXIF 도 파일명도 없을 때 사용자가 손으로
+            # 정리해 둔 "2024/7월/포켓몬고페스트" 폴더가 마지막 단서입니다.
+            when, src = naming.resolve_datetime(path.name, exif["dt"], str(path))
             con.execute(
                 "INSERT INTO photo(sha256, path, bytes, width, height, kind, shot_at,"
                 " shot_at_src, make, model, gps_lat, gps_lon, phash, origin, imported_at)"
