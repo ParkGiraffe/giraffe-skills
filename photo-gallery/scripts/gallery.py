@@ -115,9 +115,15 @@ def cmd_blog(args):
     posts = blogmod.fetch_all(args.blog_id, pages=args.pages)
     for post in posts:
         tag, _rest = blogmod.split_tag(post["title"])
-        con.execute("INSERT OR REPLACE INTO blog_post(log_no, title, tag, posted_at)"
-                    " VALUES(?,?,?,?)",
-                    (post["log_no"], post["title"], tag, post["posted_at"]))
+        # INSERT OR REPLACE 를 쓰면 안 됩니다. REPLACE 는 기존 행을 지우고 새로
+        # 넣으므로 VALUES 에 없는 images_collected_at 이 NULL 로 초기화됩니다.
+        # 이 루프는 매 실행마다 758편 전부에 대해 도니까, 바로 아래에서 계산하는
+        # done 이 항상 비어 재개 가능성이 통째로 무력화됩니다.
+        con.execute(
+            "INSERT INTO blog_post(log_no, title, tag, posted_at) VALUES(?,?,?,?)"
+            " ON CONFLICT(log_no) DO UPDATE SET"
+            " title=excluded.title, tag=excluded.tag, posted_at=excluded.posted_at",
+            (post["log_no"], post["title"], tag, post["posted_at"]))
     con.commit()
     print(f"글 {len(posts)}편 저장")
 
@@ -149,6 +155,26 @@ def cmd_blog(args):
     return 0
 
 
+def cmd_match(args):
+    import matching
+    con = index.open_db(args.db)
+    stat = matching.match_by_name(con)
+    print(f"파일명 매칭: 맞음 {stat['맞음']}, 모호 {stat['모호']}, 없음 {stat['없음']}")
+    if args.hash:
+        h = matching.match_by_hash(con, args.blog_id, args.threshold, limit=args.limit)
+        print(f"지각해시 폴백: 맞음 {h['맞음']}, 없음 {h['없음']}, 실패 {h['실패']}")
+    rows = con.execute(
+        "SELECT p.tag, COUNT(*) FROM blog_image i"
+        " JOIN blog_post p ON p.log_no = i.log_no"
+        " WHERE i.sha256 IS NOT NULL AND p.tag IS NOT NULL"
+        " GROUP BY p.tag ORDER BY 2 DESC LIMIT 20").fetchall()
+    print("매칭된 사진이 많은 태그:")
+    for tag, n in rows:
+        print(f"  {tag}: {n}")
+    con.close()
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="T7 사진 갤러리 도구")
     ap.add_argument("--db", default=str(DB))
@@ -163,6 +189,14 @@ def main(argv=None):
     p.add_argument("--blog-id", default="op5321")
     p.add_argument("--pages", type=int, default=30)
     p.set_defaults(func=cmd_blog)
+
+    p = sub.add_parser("match", help="블로그 이미지와 로컬 사진을 잇습니다")
+    p.add_argument("--hash", action="store_true",
+                   help="파일명으로 못 찾은 것을 지각해시로 다시 시도합니다 (네트워크)")
+    p.add_argument("--blog-id", default="op5321")
+    p.add_argument("--threshold", type=int, default=6)
+    p.add_argument("--limit", type=int, default=0)
+    p.set_defaults(func=cmd_match)
 
     args = ap.parse_args(argv)
     return args.func(args)

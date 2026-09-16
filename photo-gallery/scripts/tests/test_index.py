@@ -100,6 +100,25 @@ class TestSchema(unittest.TestCase):
         self.assertIsInstance(got, str)
         con.close()
 
+    def test_post_upsert_keeps_images_collected_at(self):
+        """글 목록을 다시 받아도 수집 완료 표시가 살아남아야 합니다.
+
+        INSERT OR REPLACE 는 행을 지우고 새로 넣어 이 컬럼을 NULL 로 만듭니다.
+        그러면 재개 가능성이 통째로 무력화되므로 UPSERT 여야 합니다.
+        """
+        con = index.open_db(self.db)
+        con.execute("INSERT INTO blog_post(log_no, title, tag, posted_at,"
+                    " images_collected_at) VALUES('1','옛 제목','태그','d','t')")
+        con.execute(
+            "INSERT INTO blog_post(log_no, title, tag, posted_at) VALUES(?,?,?,?)"
+            " ON CONFLICT(log_no) DO UPDATE SET"
+            " title=excluded.title, tag=excluded.tag, posted_at=excluded.posted_at",
+            ("1", "새 제목", "태그", "d"))
+        row = con.execute(
+            "SELECT title, images_collected_at FROM blog_post WHERE log_no='1'").fetchone()
+        self.assertEqual(("새 제목", "t"), row)
+        con.close()
+
     def test_migration_adds_images_collected_at(self):
         """옛 모양 blog_post 표에도 open_db 가 새 컬럼을 채워 넣어야 합니다.
 
