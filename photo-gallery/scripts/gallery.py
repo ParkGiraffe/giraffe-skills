@@ -121,7 +121,10 @@ def cmd_blog(args):
     con.commit()
     print(f"글 {len(posts)}편 저장")
 
-    done = {r[0] for r in con.execute("SELECT DISTINCT log_no FROM blog_image")}
+    # 이미지가 0개인 글도 "수집 완료" 로 표시해야 재실행 때 다시 받지 않습니다.
+    # blog_image 행 유무로만 판단하면 코드블록만 있는 JS 강의 글 27편이 매번 재수집됩니다.
+    done = {r[0] for r in con.execute(
+        "SELECT log_no FROM blog_post WHERE images_collected_at IS NOT NULL")}
     todo = [p for p in posts if p["log_no"] not in done]
     print(f"이미지 수집 대상 {len(todo)}편")
     for i, post in enumerate(todo, 1):
@@ -135,6 +138,8 @@ def cmd_blog(args):
             "INSERT OR IGNORE INTO blog_image(log_no, filename, match)"
             " VALUES(?,?,'none')",
             [(post["log_no"], n) for n in names])
+        con.execute("UPDATE blog_post SET images_collected_at=? WHERE log_no=?",
+                    (dt.datetime.now().isoformat(timespec="seconds"), post["log_no"]))
         con.commit()
         if i % 25 == 0:
             print(f"  [{i}/{len(todo)}] 진행 중")

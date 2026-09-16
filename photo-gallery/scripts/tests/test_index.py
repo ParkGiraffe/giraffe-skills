@@ -5,6 +5,7 @@
     python3 photo-gallery/scripts/tests/test_index.py
 """
 import pathlib
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -97,6 +98,68 @@ class TestSchema(unittest.TestCase):
         con.execute("UPDATE photo SET phash='1234567890123456' WHERE sha256='b'")
         got = con.execute("SELECT phash FROM photo WHERE sha256='b'").fetchone()[0]
         self.assertIsInstance(got, str)
+        con.close()
+
+    def test_migration_adds_images_collected_at(self):
+        """옛 모양 blog_post 표에도 open_db 가 새 컬럼을 채워 넣어야 합니다.
+
+        CREATE TABLE IF NOT EXISTS 는 이미 있는 표를 건드리지 않으므로, 컬럼을
+        DDL에만 추가해서는 기존 DB가 못 따라옵니다. _migrate() 가 ALTER TABLE로
+        메꾸는지 직접 확인합니다.
+        """
+        con = sqlite3.connect(str(self.db))
+        con.execute("""
+            CREATE TABLE blog_post (
+              log_no    TEXT PRIMARY KEY,
+              title     TEXT NOT NULL,
+              tag       TEXT,
+              posted_at TEXT
+            )
+        """)
+        con.close()
+
+        con = index.open_db(self.db)
+        cols = {row[1] for row in con.execute("PRAGMA table_info(blog_post)")}
+        self.assertIn("images_collected_at", cols)
+        con.close()
+
+    def test_migration_backfills_already_collected_posts(self):
+        """blog_image 행이 있던 글은 컬럼이 막 생겨도 재수집 대상이 되면 안 됩니다.
+
+        컬럼만 추가하고 비워 두면, 옛 스키마로 이미 이미지까지 받아 둔 글도
+        images_collected_at이 없다는 이유만으로 cmd_blog가 재실행 때마다 다시
+        받습니다. 이미지가 0개라 blog_image 행이 아예 없는 글은 옛 스키마로는
+        "받았는지" 구분할 수 없으므로 비워 둔 채로 남아야 합니다.
+        """
+        con = sqlite3.connect(str(self.db))
+        con.execute("""
+            CREATE TABLE blog_post (
+              log_no    TEXT PRIMARY KEY,
+              title     TEXT NOT NULL,
+              tag       TEXT,
+              posted_at TEXT
+            )
+        """)
+        con.execute("""
+            CREATE TABLE blog_image (
+              log_no   TEXT NOT NULL,
+              filename TEXT NOT NULL,
+              sha256   TEXT,
+              match    TEXT,
+              PRIMARY KEY (log_no, filename)
+            )
+        """)
+        con.execute("INSERT INTO blog_post(log_no, title) VALUES('1', '이미지 있음')")
+        con.execute("INSERT INTO blog_post(log_no, title) VALUES('2', '이미지 없음')")
+        con.execute(
+            "INSERT INTO blog_image(log_no, filename, match) VALUES('1','a.jpg','none')")
+        con.commit()
+        con.close()
+
+        con = index.open_db(self.db)
+        got = dict(con.execute("SELECT log_no, images_collected_at FROM blog_post"))
+        self.assertIsNotNone(got["1"])
+        self.assertIsNone(got["2"])
         con.close()
 
     def test_keyword_is_unique_per_photo(self):

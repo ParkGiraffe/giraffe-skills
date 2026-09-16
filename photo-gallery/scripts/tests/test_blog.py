@@ -29,8 +29,19 @@ class TestPostList(unittest.TestCase):
             self.assertTrue(p["log_no"].isdigit(), p)
 
     def test_title_is_url_decoded(self):
+        """공백이 "+" 로 오므로 unquote 가 아니라 unquote_plus 여야 합니다.
+
+        픽스처 내용에 기대지 않습니다. 실제 제목 758개 중 10개는 "판타노 바인더 + 속지"
+        처럼 정당하게 "+" 를 포함하므로, "제목에 + 가 없다" 로 단언하면 픽스처를
+        갱신할 때 엉뚱하게 깨집니다.
+        """
+        sample = ('{"logNo":"1","title":"%5B%ED%8F%AC%EC%BC%93%EB%AA%AC%5D'
+                  '+%EC%84%B1%EC%88%98","categoryNo":"1","addDate":"2026. 5. 1."}')
+        self.assertEqual("[포켓몬] 성수", blog.parse_post_list(sample)[0]["title"])
+
+    def test_fixture_titles_are_decoded(self):
         titles = [p["title"] for p in blog.parse_post_list(self.text)]
-        self.assertFalse(any("+" in t and "%" in t for t in titles))
+        self.assertFalse(any("%" in t for t in titles))
         self.assertTrue(any("[" in t for t in titles))
 
 
@@ -89,9 +100,17 @@ class TestImageUrls(unittest.TestCase):
                          [n for n, _u in blog.parse_image_urls(self.html)])
 
     def test_urls_are_absolute_and_full_quality(self):
-        for _n, url in blog.parse_image_urls(self.html):
+        """원본 src 에 이미 ?type=w80_blur 가 붙어 있습니다.
+
+        떼지 않고 붙이면 "?" 가 두 개인 망가진 URL 이 됩니다. assertIn 으로는
+        그 중복을 못 잡으므로 "?" 개수를 셉니다.
+        """
+        urls = blog.parse_image_urls(self.html)
+        self.assertTrue(urls, "픽스처에서 이미지 URL 을 하나도 못 뽑았습니다")
+        for _n, url in urls:
             self.assertTrue(url.startswith("http"), url)
-            self.assertIn("type=w3840", url)
+            self.assertEqual(1, url.count("?"), url)
+            self.assertTrue(url.endswith("?type=w3840"), url)
 
 
 if __name__ == "__main__":
