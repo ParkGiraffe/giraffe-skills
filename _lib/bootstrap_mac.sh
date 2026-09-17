@@ -2,11 +2,25 @@
 # 새 맥에서 젤다무쌍 제작·업로드 환경을 점검하고 맞춘다 (2026-09-17).
 #   _lib/bootstrap_mac.sh /Volumes/T7 [--check]
 # --check 를 주면 설치·복사 없이 점검 결과만 출력한다.
+# --check 에서도 6번은 /tmp/zelda_ep01_preview.html을 실제로 쓰고, 4번은 크롬을 띄울 수 있다.
 set -u
 T7="${1:?사용: bootstrap_mac.sh <T7 경로> [--check]}"; CHECK="${2:-}"
 ENV_ROOT="$T7/블로그/_환경"; SERIES="$T7/블로그/닌텐도게임일지/젤다무쌍"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ok() { echo "  [OK] $1"; }; bad() { echo "  [해야 함] $1"; FAIL=1; }
+same_tree() {  # 백업($1)과 현재($2)가 같은지. 파일 이름은 NFC로 정규화하고 AppleDouble(._*)·.DS_Store는 뺀다. 단일 파일도 받는다
+  python3 - "$1" "$2" <<'PY'
+import sys, pathlib, unicodedata, filecmp
+a, b = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+if a.is_file() or b.is_file():
+    sys.exit(0 if a.is_file() and b.is_file() and filecmp.cmp(a, b, shallow=False) else 1)
+def files(root):
+    return {unicodedata.normalize("NFC", str(p.relative_to(root))): p
+            for p in root.rglob("*") if p.is_file() and not p.name.startswith("._") and p.name != ".DS_Store"}
+fa, fb = files(a), files(b)
+sys.exit(0 if set(fa) == set(fb) and all(filecmp.cmp(fa[k], fb[k], shallow=False) for k in fa) else 1)
+PY
+}
 FAIL=0
 echo "== 1. Homebrew"
 if command -v brew >/dev/null; then ok "brew $(brew --version | head -1)"; else bad "Homebrew 없음. https://brew.sh 안내대로 설치 후 다시 실행"; exit 1; fi
@@ -33,7 +47,7 @@ if [ -z "$LATEST" ]; then bad "백업 없음 ($ENV_ROOT/claude)"; else
   for pair in "claude-home/CLAUDE.md:$HOME/.claude/CLAUDE.md" "claude-memory:$MEM"; do
     src="$LATEST/${pair%%:*}"; dst="${pair##*:}"
     if [ -e "$dst" ]; then
-      if diff -rq "$src" "$dst" >/dev/null 2>&1; then ok "$dst 동일"; else bad "$dst 이미 있고 백업과 다름. 손으로 비교할 것: diff -r \"$src\" \"$dst\""; fi
+      if same_tree "$src" "$dst"; then ok "$dst 동일"; else bad "$dst 이미 있고 백업과 다름. 손으로 비교할 것: diff -r -x '._*' -x .DS_Store \"$src\" \"$dst\""; fi
     else
       if [ "$CHECK" = "--check" ]; then bad "$dst 없음 (복원 예정)"; else mkdir -p "$(dirname "$dst")" && cp -R "$src" "$dst" && ok "$dst 복원"; fi
     fi

@@ -4,6 +4,7 @@
 # 복사 대상: 블로그 초안 폴더, docs/superpowers 설계·계획, 클로드 메모리와 전역 설정,
 # 이 리포의 미추적 파일. 세션 기록(jsonl)은 용량이 커서 --sessions 를 줄 때만 복사한다.
 set -e
+export COPYFILE_DISABLE=1
 DEST_ROOT="${1:?사용: backup_claude_to_ssd.sh <드라이브 경로> [--sessions]}"
 STAMP=$(date +%Y%m%d)
 ENV_ROOT="$DEST_ROOT/블로그/_환경"
@@ -21,7 +22,7 @@ rsync -a "$HOME/.claude/CLAUDE.md" "$DEST/claude-home/CLAUDE.md"
 [ -f "$HOME/.claude/settings.json" ] && rsync -a "$HOME/.claude/settings.json" "$DEST/claude-home/settings.json"
 [ -f "$HOME/.claude/keybindings.json" ] && rsync -a "$HOME/.claude/keybindings.json" "$DEST/claude-home/keybindings.json"
 rsync -a "$CLAUDE_PROJ/memory/" "$DEST/claude-memory/"
-git -C "$REPO" ls-files --others --exclude-standard | grep -v '^\.claude/' | while read -r f; do
+git -C "$REPO" -c core.quotepath=off ls-files --others --exclude-standard | grep -v '^\.claude/' | while read -r f; do
   mkdir -p "$DEST/repo-untracked/$(dirname "$f")"; cp -R "$REPO/$f" "$DEST/repo-untracked/$f"; done
 if [ "$2" = "--sessions" ]; then rsync -a "$CLAUDE_PROJ"/*.jsonl "$DEST/claude-sessions/"; fi
 cat > "$DEST/README.md" <<TXT

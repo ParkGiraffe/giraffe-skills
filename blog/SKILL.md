@@ -231,6 +231,6 @@ python3 blog/scripts/upload_to_editor.py .claude/blog-corpus/drafts/<드래프�
 3. `_lib/story_plan_edit.py "<편 폴더>" <지시.json>`: 사진 번호 기준으로 skip, headings, videos_after, crop을 한 번에 적용합니다.
 4. `story_frames.py render "<편 폴더>" --title "<제목>" --category-no 176`: `초안/`에 `images/`, `script.md`, `meta.json`.
    `초안/script.md`가 이미 있으면 멈추므로 다시 만들 때는 `--force`.
-5. `script.md`의 `<!-- 캡션 -->`을 채우고 `<!-- 도입 -->`은 지운 뒤 `story_frames.py check`와
-   `korean-writing/scripts/lint.py`를 통과시킵니다.
+5. `script.md`의 `<!-- 캡션 -->`을 채우고 `<!-- 도입 -->`은 지운 뒤 `story_frames.py check "<편 폴더>/초안/script.md"`와
+   `korean-writing/scripts/lint.py "<편 폴더>/초안/script.md"`를 통과시킵니다.
 6. 업로드는 `blog/scripts/upload_to_editor.py "<편 폴더>/초안"`입니다. `meta.json`은 상대 경로라 어느 맥에서든 같습니다.
