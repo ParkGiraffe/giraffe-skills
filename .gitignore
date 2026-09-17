@@ -11,3 +11,7 @@ tistory-to-naver/scripts/images/
 
 # superpowers SDD 작업 공간(스크래치)
 .superpowers/
+
+# pdf-ocr-epub: visionocr.swift에서 빌드되는 산출물 (첫 실행 때 자동 생성)
+pdf-ocr-epub/scripts/visionocr
+pdf-ocr-epub/scripts/*.dSYM/
