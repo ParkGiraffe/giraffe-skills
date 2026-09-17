@@ -10,12 +10,15 @@
 이어서 누르면 직전 저장 이후 구간만 담기므로, 앞 클립 종료와 다음 클립 시작의 틈이
 gap초 이내면 같은 촬영으로 본다. 같은 촬영의 클립은 재인코딩 없이 이어 붙일 수 있다.
 2026-09-03 젤다무쌍 봉인전기 클립 103개로 검증했다. 병합본은 원본과 비트레이트가 같았다.
+
+sessions.json의 raw_dir은 sessions.json 폴더 기준 상대 경로다.
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -97,6 +100,12 @@ def write_json(path: pathlib.Path, obj) -> None:
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def resolve_raw_dir(work: pathlib.Path, value: str) -> pathlib.Path:
+    """sessions.json의 raw_dir을 그 파일이 있는 폴더 기준으로 해석한다. 절대 경로는 그대로 쓴다."""
+    p = pathlib.Path(value).expanduser()
+    return p.resolve() if p.is_absolute() else (work / p).resolve()
+
+
 def cmd_scan(args) -> None:
     raw = pathlib.Path(args.raw_dir).expanduser().resolve()
     out = pathlib.Path(args.out).expanduser().resolve()
@@ -104,7 +113,7 @@ def cmd_scan(args) -> None:
     clips = probe_dir(raw)
     sessions = group_sessions(clips, args.gap)
     write_json(out / "sessions.json",
-               {"raw_dir": str(raw), "gap": args.gap, "clips": clips, "sessions": sessions})
+               {"raw_dir": os.path.relpath(raw, out), "gap": args.gap, "clips": clips, "sessions": sessions})
     for s in sessions:
         print(f"{s['id']} {s['start'][5:19]} 클립 {len(s['files']):2d} {s['total']:7.1f}s")
     print(f"클립 {len(clips)}개 -> 촬영 {len(sessions)}건 -> {out / 'sessions.json'}")
@@ -154,7 +163,7 @@ def render_strip(raw_dir: pathlib.Path, session: dict, out_path: pathlib.Path,
 def cmd_strips(args) -> None:
     work = pathlib.Path(args.work_dir).expanduser().resolve()
     data = read_json(work / "sessions.json")
-    raw_dir = pathlib.Path(data["raw_dir"])
+    raw_dir = resolve_raw_dir(work, data["raw_dir"])
     out = work / "strips"
     out.mkdir(exist_ok=True)
     wanted = set(args.session or [])
@@ -224,7 +233,7 @@ def render_entry(entry: dict, sessions_by_id: dict, raw_dir: pathlib.Path,
 def cmd_render(args) -> None:
     work = pathlib.Path(args.work_dir).expanduser().resolve()
     data = read_json(work / "sessions.json")
-    raw_dir = pathlib.Path(data["raw_dir"])
+    raw_dir = resolve_raw_dir(work, data["raw_dir"])
     by_id = {s["id"]: s for s in data["sessions"]}
     entries = read_json(pathlib.Path(args.videos).expanduser().resolve())
     if args.episode is not None:

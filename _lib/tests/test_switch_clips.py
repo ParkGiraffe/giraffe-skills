@@ -128,5 +128,16 @@ class ProbeTest(unittest.TestCase):
         self.assertEqual(sc.safe_name('젤다: "시작"/대지?'), "젤다 시작 대지")
 
 
+class ResolveRawDirTest(unittest.TestCase):
+    def test_relative_raw_dir_resolves_against_work(self):
+        work = pathlib.Path("/tmp/x/01_기획/영상촬영건")
+        # /tmp가 /private/tmp의 심볼릭 링크인 macOS에서 resolve()가 정규화하므로
+        # 기대값도 resolve()를 거쳐 비교한다.
+        self.assertEqual(sc.resolve_raw_dir(work, "../../00_원본"), pathlib.Path("/tmp/x/00_원본").resolve())
+
+    def test_absolute_raw_dir_is_kept(self):
+        self.assertEqual(sc.resolve_raw_dir(pathlib.Path("/tmp/x"), "/Volumes/T7/원본"), pathlib.Path("/Volumes/T7/원본").resolve())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
