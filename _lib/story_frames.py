@@ -4,7 +4,7 @@
 
     story_frames.py scan   <편 폴더> --out <작업 폴더> [--originals <원본 폴더>] [--threshold 0.10]
     story_frames.py sheet  <작업 폴더>
-    story_frames.py render <작업 폴더> --out <초안 폴더> --title <제목>
+    story_frames.py render <작업 폴더> [--out <초안 폴더>] --title <제목>
                            [--category <이름>] [--category-no N] [--date YYYY-MM-DD] [--no-watermark]
     story_frames.py check  <script.md>
 
@@ -349,8 +349,8 @@ def render(plan: dict, out_dir: pathlib.Path, title: str, category: str,
         "category": category,
         "category_no": category_no,
         "hashtags": [],
-        "images": {"count": count, "source_folder": str(images.resolve())},
-        "videos_folder": str(out_dir.resolve()),
+        "images": {"count": count, "source_folder": "images"},
+        "videos_folder": ".",
         "videos": videos,
     }
     write_json(out_dir / "meta.json", meta)
@@ -397,7 +397,7 @@ def check_captions(md: str) -> list[tuple[int, str]]:
 def cmd_render(args) -> None:
     work = pathlib.Path(args.work_dir).expanduser().resolve()
     plan = read_json(work / "plan.json")
-    out = pathlib.Path(args.out).expanduser().resolve()
+    out = pathlib.Path(args.out).expanduser().resolve() if args.out else work / "초안"
     date = args.date or dt.date.today().isoformat()
     meta = render(plan, out, title=args.title, category=args.category,
                   category_no=args.category_no, date=date, watermark=not args.no_watermark,
@@ -433,7 +433,7 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("render", help="plan.json대로 초안 폴더를 만든다")
     p.add_argument("work_dir")
-    p.add_argument("--out", required=True)
+    p.add_argument("--out", default=None, help="생략하면 <작업 폴더>/초안")
     p.add_argument("--title", required=True)
     p.add_argument("--category", default="젤다무쌍 봉인전기")
     p.add_argument("--category-no", type=int, default=None)
