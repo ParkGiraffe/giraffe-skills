@@ -205,37 +205,32 @@ python3 blog/scripts/upload_to_editor.py .claude/blog-corpus/drafts/<드래프�
 확정한 절차이며, 사진 1,100장과 클립 103개를 기준으로 검증했습니다.
 
 규칙 요약:
-- 캡션은 상황 서술만 씁니다. 사진에 보이는 대사를 다시 적지 않고 낫표 인용을 쓰지 않습니다.
-  클리어 타임 같은 결과 화면 수치도 쓰지 않습니다. 캡션은 반드시 마침표로 끝냅니다.
+- 캡션은 상황 서술만 씁니다. 사진 한두 장에 하나만 둡니다. 도입 문단과 마무리 문단은 두지
+  않습니다. 소제목은 퀘스트 : 미션명, 보스전 : 이름, vs 이름 형식입니다. 사진에 보이는 대사를
+  다시 적지 않고 낫표 인용을 쓰지 않습니다. 클리어 타임 같은 결과 화면 수치도 쓰지 않습니다.
+  캡션은 반드시 마침표로 끝냅니다.
 - 결과 화면, 챕터 메뉴, 배틀 챌린지 사진은 뺍니다. 튜토리얼 팝업은 첫 편에 두세 장만 둡니다.
-- 같은 구도에 자막만 바뀌는 연속 컷은 첫 장을 원본으로 두고 나머지 자막 띠를 세로로 이어
-  붙인 합성 이미지 한 장으로 줄입니다. 강적에 전투 영상이 있으면 전투 사진은 이름 카드와
+- 같은 구도 연속 컷은 한 장만 둡니다. 강적에 전투 영상이 있으면 전투 사진은 이름 카드와
   액션 한 장으로 줄입니다.
 - 영상은 강적마다 전투 모션 하나를 원칙으로 두고, 편당 1~3개, 60초 안팎입니다.
 
-영상 (`_lib/switch_clips.py`):
-1. `switch_clips.py scan <원본 폴더> --out <작업 폴더>`: 클립을 촬영 건으로 묶어 `sessions.json`.
-   스위치 30초 제한으로 쪼개진 클립은 틈 3초 이내면 같은 촬영입니다.
-2. `switch_clips.py strips <작업 폴더> --session S51`: 1초 간격 프레임 띠. 앞뒤 자를 초를 정합니다.
-3. `videos.json`에 `{"episode", "slot", "title", "sessions", "in", "out"}`를 적고
-   `switch_clips.py render <작업 폴더> videos.json --out <초안>/images --episode N`.
-   자르기가 없으면 무손실 병합, 있으면 재인코딩입니다. `videos_meta.json`이 함께 나옵니다.
+데이터 위치 (T7): `/Volumes/T7/블로그/닌텐도게임일지/젤다무쌍/`. `00_원본`이 스위치 캡처 원본,
+`02_영상병합본`이 병합 클립, `10_편별/NN M-N 미션명/`이 편 폴더입니다. 편 폴더의 `사진/`이 선별 사진,
+`영상/`이 편별 영상, `초안/`이 대본과 워터마크 사진입니다. `series.json`에 편 목록과 상태가 있습니다.
+새 맥에서는 `_lib/bootstrap_mac.sh /Volumes/T7`로 도구와 폰트, 크롬 설정을 먼저 맞춥니다.
+
+영상 (`_lib/switch_clips.py`, 촬영 건 목록은 `01_기획/영상촬영건/`):
+`scan`이 쓰는 `sessions.json`의 `raw_dir`은 그 폴더 기준 상대 경로입니다.
+1. `videos.json`을 편 폴더에 `{"episode", "slot", "title", "sessions", "in", "out"}` 형태로 씁니다.
+2. `switch_clips.py render "01_기획/영상촬영건" "<편 폴더>/videos.json" --out "<편 폴더>/초안/images" --episode N`.
+   자르기가 없으면 무손실 병합, 있으면 재인코딩입니다.
 
 사진 (`_lib/story_frames.py`):
-1. `story_frames.py scan <편 폴더> --out <작업 폴더> --originals <원본 폴더>`: 유형 추정과
-   같은 구도 묶기로 `plan.json`. 손 크롭본은 원본으로 되돌립니다.
-   `plan.json`이 이미 있으면 멈추며 `--force`를 줘야 덮어씁니다.
-2. `story_frames.py sheet <작업 폴더>`: 콘택트 시트를 눈으로 보고 `plan.json`을 고칩니다.
-   틀린 묶음을 풀고, 뺄 사진을 `skip`으로, 팝업을 `crop`으로, 영상 자리를 `video`로,
-   장면 전환을 `heading`으로 적습니다. 이 단계를 건너뛰지 않습니다.
-2-1. 캡션을 쓰기 전에 `_lib/story_read_sheet.py <작업 폴더>`로 자막 띠를 크게 붙인 판독용 시트를 만듭니다.
-   콘택트 시트 썸네일로는 자막이 안 읽힙니다. 계획 수정은 `_lib/story_plan_edit.py <작업 폴더> <지시.json>`에
-   사진 번호 기준으로 뺄 사진, 소제목, 영상 자리, 크롭을 적어 한 번에 적용합니다.
-3. `story_frames.py render <작업 폴더> --out <초안> --title "<제목>" --category-no N`:
-   `images/`, `script.md` 뼈대, `meta.json`. 워터마크까지 들어갑니다.
-   초안 폴더에 `script.md`가 이미 있으면 멈추므로 캡션을 쓴 뒤에는 다른 폴더로
-   내보내거나 `--force`를 씁니다.
-4. `script.md`의 `<!-- 도입 -->`과 `<!-- 캡션 -->`을 채운 뒤
-   `story_frames.py check script.md`와 `korean-writing/scripts/lint.py script.md`를 통과시킵니다.
-5. 업로드는 평소대로 `blog/scripts/upload_to_editor.py <초안>`입니다. `meta.json`의
-   `videos_folder`와 `videos[]`를 이 파이프라인이 미리 채워 둡니다.
+1. `story_frames.py scan "<편 폴더>/사진" --out "<편 폴더>"`: 유형 추정으로 `plan.json`. 이미 있으면 `--force`.
+2. `_lib/story_read_sheet.py "<편 폴더>"`: 자막이 읽히는 판독용 시트입니다. 이걸 보고 남길 사진과 소제목을 정합니다.
+3. `_lib/story_plan_edit.py "<편 폴더>" <지시.json>`: 사진 번호 기준으로 skip, headings, videos_after, crop을 한 번에 적용합니다.
+4. `story_frames.py render "<편 폴더>" --title "<제목>" --category-no 176`: `초안/`에 `images/`, `script.md`, `meta.json`.
+   `초안/script.md`가 이미 있으면 멈추므로 다시 만들 때는 `--force`.
+5. `script.md`의 `<!-- 캡션 -->`을 채우고 `<!-- 도입 -->`은 지운 뒤 `story_frames.py check`와
+   `korean-writing/scripts/lint.py`를 통과시킵니다.
+6. 업로드는 `blog/scripts/upload_to_editor.py "<편 폴더>/초안"`입니다. `meta.json`은 상대 경로라 어느 맥에서든 같습니다.
