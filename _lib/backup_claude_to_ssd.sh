@@ -6,11 +6,13 @@
 set -e
 DEST_ROOT="${1:?사용: backup_claude_to_ssd.sh <드라이브 경로> [--sessions]}"
 STAMP=$(date +%Y%m%d)
-DEST="$DEST_ROOT/claude-backup-$STAMP"
+ENV_ROOT="$DEST_ROOT/블로그/_환경"
+DEST="$ENV_ROOT/claude/claude-backup-$STAMP"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PROJ_KEY="$(echo "$REPO" | sed 's#/#-#g')"
 CLAUDE_PROJ="$HOME/.claude/projects/$PROJ_KEY"
-mkdir -p "$DEST"
+mkdir -p "$DEST" "$ENV_ROOT/fonts"
+[ -f "$HOME/Library/Fonts/BMDOHYEON_otf.otf" ] && cp "$HOME/Library/Fonts/BMDOHYEON_otf.otf" "$ENV_ROOT/fonts/"
 echo "== 대상: $DEST"
 rsync -a --exclude '.DS_Store' "$REPO/.claude/blog-corpus/" "$DEST/blog-corpus/"
 rsync -a "$REPO/docs/" "$DEST/docs/"
@@ -29,8 +31,9 @@ cat > "$DEST/README.md" <<TXT
 1. 리포를 같은 경로에 받습니다: git clone https://github.com/ParkGiraffe/giraffe-skills.git $REPO
 2. blog-corpus/ 를 $REPO/.claude/blog-corpus/ 로, docs/ 를 $REPO/docs/ 로 복사합니다.
 3. claude-home/CLAUDE.md 를 ~/.claude/CLAUDE.md 로 복사합니다 (settings, keybindings도 있으면 같이).
-4. claude-memory/ 를 ~/.claude/projects/$PROJ_KEY/memory/ 로 복사합니다. 경로 이름은 리포 경로에서 슬래시를 대시로 바꾼 것입니다.
-5. repo-untracked/ 는 git에 없던 파일이니 필요한 것만 리포에 되돌립니다.
-6. 사진·영상 원본과 편별 계획은 T7의 블로그/닌텐도게임일지/ 아래에 그대로 있습니다.
+4. 폰트는 _환경/fonts/ 에서 ~/Library/Fonts/ 로 복사합니다.
+5. claude-memory/ 를 ~/.claude/projects/$PROJ_KEY/memory/ 로 복사합니다. 경로 이름은 리포 경로에서 슬래시를 대시로 바꾼 것입니다.
+6. repo-untracked/ 는 git에 없던 파일이니 필요한 것만 리포에 되돌립니다.
+7. 사진·영상 원본과 편별 계획은 T7의 블로그/닌텐도게임일지/ 아래에 그대로 있습니다.
 TXT
 du -sh "$DEST"; echo "== 완료"
