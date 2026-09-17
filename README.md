@@ -7,7 +7,7 @@
 `face-anonymizer`, `instagram-download`, `youtube-music-download`, `rebase-on-main` 정도가
 계정과 무관하게 동작합니다. 나머지는 포크해서 블로그 ID와 Notion DB ID를 바꿔야 합니다.
 
-## 수록 스킬 (22개)
+## 수록 스킬 (25개)
 
 ### 블로그 글쓰기
 
@@ -18,6 +18,12 @@
 | [`blog-title`](./blog-title/) | 코퍼스의 카테고리별 `[IP/브랜드 + 형태]` 태그 컨벤션을 학습해 제목 후보 5개를 추천합니다. |
 | [`blog-topic-brief`](./blog-topic-brief/) | 잘 모르는 주제를 웹 검색으로 사전조사한 뒤 사실관계를 정리하고, `[코퍼스 기반]`과 `[일반 SEO 기반]` 두 갈래로 제목과 태그를 냅니다. |
 | [`naver-blog-tags`](./naver-blog-tags/) | 글에서 키워드를 뽑아 네이버 연관검색어와 대조하고, 기존 글의 태그 형식과 공식 표기로 정제해 해시태그를 만듭니다. |
+
+### 한국어 글쓰기 규약
+
+| 스킬 | 하는 일 |
+|---|---|
+| [`korean-writing`](./korean-writing/) | 남에게 보낼 한국어 글(메일, 코드리뷰 코멘트, 슬랙·깃허브 쓰레드 답변, 피그마 코멘트)을 규약대로 쓰고 두 단계로 검증합니다. 규칙 정본은 `references/rules.md`와 `judgments.md`이고 `scripts/lint.py`로 검사합니다. |
 
 ### 블로그 이전과 발행
 
@@ -44,6 +50,7 @@
 | [`face-anonymizer`](./face-anonymizer/) | 폴더 안 사진 속 얼굴을 YuNet으로 검출해 원 또는 모자이크로 일괄 익명화합니다. 원본은 보존하고 별도 폴더에 저장합니다. |
 | [`instagram-download`](./instagram-download/) | 공개 인스타그램 게시물 사진을 로그인 없이 받습니다. 캐러셀 전체 또는 `?img_index=N`으로 한 장만 받습니다. |
 | [`youtube-music-download`](./youtube-music-download/) | 유튜브 영상을 mp3로 받습니다. 재생목록 파라미터를 무시하고, 403이 뜨면 yt-dlp를 자동 최신화한 뒤 재시도합니다. |
+| [`pdf-ocr-epub`](./pdf-ocr-epub/) | 스캔 PDF에 macOS Vision으로 한국어 OCR 텍스트 층을 얹어 검색 가능하게 만들고, 텍스트 PDF는 EPUB으로 바꿉니다. 원본 그림을 다시 압축하지 않아 화질이 그대로입니다. 이미지 zip도 PDF로 묶습니다. |
 
 ### 개인 기록과 조사
 
@@ -59,6 +66,7 @@
 
 | 스킬 | 하는 일 |
 |---|---|
+| [`figma-custom-extension`](./figma-custom-extension/) | Figma MCP로 디자인을 코드로 옮길 때 아이콘과 에셋의 실제 벡터를 확실히 뽑아내고, 결과를 Figma 스크린샷과 픽셀 단위로 대조합니다. |
 | [`rebase-on-main`](./rebase-on-main/) | 현재 브랜치를 `origin/main` 위로 리베이스합니다. main을 진실로 보고 충돌 시 main을 채택하며, 백업 브랜치를 만들고 `force-with-lease`만 허용합니다. |
 
 ## 스킬 조합
@@ -98,7 +106,7 @@
 
 ```
 giraffe-skills/
-├── <skill>/SKILL.md      스킬 정의 22개
+├── <skill>/SKILL.md      스킬 정의 25개
 ├── <skill>/scripts/      그 스킬 전용 스크립트
 ├── _lib/                 여러 스킬이 공유하는 모듈
 ├── docs/                 설계 문서 (plans, specs)
@@ -165,10 +173,11 @@ Python 3.10+, macOS입니다. 스킬 상당수는 표준 라이브러리만 쓰�
 | `face-anonymizer` | `opencv-python-headless`, `numpy`, `pillow` |
 | `naver-photo-censor`, `naver-unpublished-photos --hash` | `pillow` |
 | `youtube-music-download` | `yt-dlp`, `ffmpeg` |
+| `pdf-ocr-epub` | `PyMuPDF`, Xcode 명령행 도구(`swiftc`), macOS 13 이상 |
 
 ```bash
 pip install --user requests beautifulsoup4 pyobjc-framework-Cocoa pyobjc-framework-Quartz \
-                   opencv-python-headless numpy pillow yt-dlp
+                   opencv-python-headless numpy pillow yt-dlp PyMuPDF
 brew install ffmpeg
 ```
 
