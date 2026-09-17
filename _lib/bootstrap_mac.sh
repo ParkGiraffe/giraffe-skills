@@ -24,13 +24,15 @@ PY
 FAIL=0
 echo "== 1. Homebrew"
 if command -v brew >/dev/null; then ok "brew $(brew --version | head -1)"; else bad "Homebrew 없음. https://brew.sh 안내대로 설치 후 다시 실행"; exit 1; fi
-echo "== 2. ffmpeg, python3, Pillow"
+echo "== 2. ffmpeg, python3, Pillow, pyobjc"
 for t in ffmpeg ffprobe python3; do
   if command -v $t >/dev/null; then ok "$t"; else
-    if [ "$CHECK" = "--check" ]; then bad "$t 없음 (brew install ${t/ffprobe/ffmpeg})"; else brew install "${t/ffprobe/ffmpeg}" && ok "$t 설치"; fi; fi
+    if [ "$CHECK" = "--check" ]; then bad "$t 없음 (brew install ${t/ffprobe/ffmpeg})"; else brew install "${t/ffprobe/ffmpeg}" && ok "$t 설치" || bad "$t 설치 실패"; fi; fi
 done
 if python3 -c "import PIL" 2>/dev/null; then ok "Pillow"; else
-  if [ "$CHECK" = "--check" ]; then bad "Pillow 없음 (python3 -m pip install --user pillow)"; else python3 -m pip install --user pillow && ok "Pillow 설치"; fi; fi
+  if [ "$CHECK" = "--check" ]; then bad "Pillow 없음 (python3 -m pip install --user pillow)"; else python3 -m pip install --user pillow && ok "Pillow 설치" || bad "Pillow 설치 실패"; fi; fi
+if python3 -c "import AppKit, Quartz" 2>/dev/null; then ok "pyobjc"; else
+  if [ "$CHECK" = "--check" ]; then bad "pyobjc 없음 (python3 -m pip install pyobjc-framework-Cocoa pyobjc-framework-Quartz)"; else python3 -m pip install pyobjc-framework-Cocoa pyobjc-framework-Quartz && ok "pyobjc 설치" || bad "pyobjc 설치 실패"; fi; fi
 echo "== 3. 워터마크 폰트"
 if [ -f "$HOME/Library/Fonts/BMDOHYEON_otf.otf" ]; then ok "도현체 있음"; else
   if [ -f "$ENV_ROOT/fonts/BMDOHYEON_otf.otf" ]; then
@@ -56,8 +58,17 @@ fi
 echo "== 6. 1편 초안 미리보기 렌더"
 D="$SERIES/10_편별/01 1-1 시작의 대지로/초안"
 if [ -f "$D/script.md" ]; then
-  python3 "$REPO/blog/scripts/md_to_smarteditor.py" "$D/script.md" "/tmp/zelda_ep01_preview.html" --images "$D/images" >/dev/null 2>&1 \
-    && n=$(grep -c "se-component se-image" /tmp/zelda_ep01_preview.html) && m=$(python3 -c "import json;print(json.load(open('$D/meta.json'))['images']['count'])") \
-    && { [ "$n" = "$m" ] && ok "사진 ${n}장 (meta와 일치)" || bad "사진 수 불일치: 미리보기 $n, meta $m"; }
+  if python3 "$REPO/blog/scripts/md_to_smarteditor.py" "$D/script.md" "/tmp/zelda_ep01_preview.html" --images "$D/images" >/dev/null 2>&1; then
+    n=$(grep -c "se-component se-image" /tmp/zelda_ep01_preview.html || true)
+    m=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1]))['images']['count'])" "$D/meta.json")
+    if [ "$n" = "$m" ]; then ok "사진 ${n}장 (meta와 일치)"; else bad "사진 수 불일치: 미리보기 $n, meta $m"; fi
+  else
+    bad "미리보기 렌더 실패 (md_to_smarteditor.py가 이모지 등으로 중단됐을 수 있음)"
+  fi
+  meta_ok=$(python3 -c "import json, sys
+d = json.load(open(sys.argv[1]))
+print(d['images']['source_folder'] == 'images' and d['videos_folder'] == '.')" "$D/meta.json")
+  if [ "$meta_ok" = "True" ]; then ok "meta 상대 경로 계약 (source_folder=images, videos_folder=.)"; else bad "meta 상대 경로 계약 어긋남: $D/meta.json"; fi
 else bad "1편 초안 없음: $D"; fi
 echo; [ "$FAIL" = 0 ] && echo "모두 준비됨. 크롬에서 네이버에 로그인하면 업로드할 수 있습니다." || echo "위 [해야 함] 항목을 처리한 뒤 다시 실행하세요."
+exit "$FAIL"
