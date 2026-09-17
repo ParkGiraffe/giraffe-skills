@@ -26,8 +26,9 @@
   upload_video.py <영상파일> [제목]
 """
 import json, os, sys, time
+import pathlib
 
-REPO = "/Users/bag-yoseb/Desktop/Project/personal/giraffe-skills"
+REPO = str(pathlib.Path(__file__).resolve().parents[1])
 sys.path.insert(0, f"{REPO}/tistory-to-naver/scripts")
 
 import migrate as M

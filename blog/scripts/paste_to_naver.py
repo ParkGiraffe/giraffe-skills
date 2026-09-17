@@ -44,7 +44,10 @@ def resolve_images_dir(draft: pathlib.Path, flag_value: str | None) -> pathlib.P
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             src = (meta.get("images") or {}).get("source_folder")
             if src:
-                p = pathlib.Path(src).resolve()
+                p = pathlib.Path(src).expanduser()
+                if not p.is_absolute():
+                    p = draft / p
+                p = p.resolve()
                 if p.exists():
                     return p
         except Exception as e:

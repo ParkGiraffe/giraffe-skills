@@ -29,8 +29,9 @@ draft_dir 요구사항:
 자리 문단을 통째로 선택해 지워 빈 문단에 캐럿을 남긴 뒤 업로더를 부른다.
 """
 import base64, json, os, re, subprocess, sys, time
+import pathlib
 
-REPO = "/Users/bag-yoseb/Desktop/Project/personal/giraffe-skills"
+REPO = str(pathlib.Path(__file__).resolve().parents[2])
 sys.path.insert(0, f"{REPO}/tistory-to-naver/scripts")
 
 import migrate as M
@@ -163,6 +164,16 @@ def counts():
     return json.loads(M.chrome_js(M.JS_PASTE_COUNTS, timeout=8))
 
 
+def resolve_videos_folder(draft, value):
+    """meta.json의 videos_folder를 초안 폴더 기준으로 해석한다. 절대 경로는 그대로 쓴다."""
+    if not value:
+        return None
+    p = pathlib.Path(value).expanduser()
+    if not p.is_absolute():
+        p = pathlib.Path(draft) / p
+    return p.resolve()
+
+
 def place_videos(draft, meta):
     """대본의 `[영상 자리 : ...]`를 실제 동영상으로 바꾼다.
 
@@ -170,7 +181,7 @@ def place_videos(draft, meta):
     그 상태에서 업로더를 부르면 동영상이 정확히 그 자리에 들어간다.
     자리가 없어질 때까지 한 개씩 처리한다.
     """
-    folder = meta.get("videos_folder")
+    folder = resolve_videos_folder(draft, meta.get("videos_folder"))
     if not folder:
         print("      videos_folder 없음 -> 영상 자리는 그대로 둔다")
         return
@@ -186,7 +197,7 @@ def place_videos(draft, meta):
         if not m:
             print(f"      [WARN] 자리 형식을 못 읽음: {slot['text'][:40]}"); break
         fname = m.group(1).strip()
-        path = f"{folder.rstrip('/')}/{fname}"
+        path = str(folder / fname)
         # 제목은 meta에 있으면 그걸 쓰고, 없으면 파일명에서 슬롯 접두어를 뗀다
         title = titles.get(fname) or fname.split("_", 2)[-1].rsplit(".", 1)[0]
 
