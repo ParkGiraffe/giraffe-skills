@@ -106,6 +106,17 @@ def resolve_raw_dir(work: pathlib.Path, value: str) -> pathlib.Path:
     return p.resolve() if p.is_absolute() else (work / p).resolve()
 
 
+def raw_dir_value(raw: pathlib.Path, out: pathlib.Path) -> str:
+    """sessions.json에 쓸 raw_dir 문자열을 정한다. out과 raw가 의미 있는 공통 상위 폴더를
+    공유하면(같은 드라이브 안이면) out 기준 상대 경로, 공유하지 않으면(볼륨이 다르거나 관계
+    없는 위치면) 절대 경로다."""
+    try:
+        common = os.path.commonpath([raw, out])
+    except ValueError:
+        common = "/"
+    return os.path.relpath(raw, out) if common not in ("/", "/Volumes") else str(raw)
+
+
 def cmd_scan(args) -> None:
     raw = pathlib.Path(args.raw_dir).expanduser().resolve()
     out = pathlib.Path(args.out).expanduser().resolve()
@@ -113,7 +124,7 @@ def cmd_scan(args) -> None:
     clips = probe_dir(raw)
     sessions = group_sessions(clips, args.gap)
     write_json(out / "sessions.json",
-               {"raw_dir": os.path.relpath(raw, out), "gap": args.gap, "clips": clips, "sessions": sessions})
+               {"raw_dir": raw_dir_value(raw, out), "gap": args.gap, "clips": clips, "sessions": sessions})
     for s in sessions:
         print(f"{s['id']} {s['start'][5:19]} 클립 {len(s['files']):2d} {s['total']:7.1f}s")
     print(f"클립 {len(clips)}개 -> 촬영 {len(sessions)}건 -> {out / 'sessions.json'}")

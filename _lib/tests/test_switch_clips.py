@@ -127,6 +127,24 @@ class ProbeTest(unittest.TestCase):
     def test_safe_name_strips_path_characters(self):
         self.assertEqual(sc.safe_name('젤다: "시작"/대지?'), "젤다 시작 대지")
 
+    def test_cmd_scan_writes_relative_raw_dir_for_sibling_out(self):
+        out = self.td / "work"
+        sc.main(["scan", str(self.raw), "--out", str(out)])
+        data = sc.read_json(out / "sessions.json")
+        self.assertTrue(data["raw_dir"].startswith(".."))
+
+
+class RawDirValueTest(unittest.TestCase):
+    def test_no_common_root_is_absolute(self):
+        raw = pathlib.Path("/Volumes/T7/원본")
+        out = pathlib.Path("/tmp/x/work")
+        self.assertEqual(sc.raw_dir_value(raw, out), str(raw))
+
+    def test_sibling_path_stays_relative(self):
+        raw = pathlib.Path("/Volumes/T7/00_원본")
+        out = pathlib.Path("/Volumes/T7/01_기획/영상촬영건")
+        self.assertEqual(sc.raw_dir_value(raw, out), "../../00_원본")
+
 
 class ResolveRawDirTest(unittest.TestCase):
     def test_relative_raw_dir_resolves_against_work(self):
