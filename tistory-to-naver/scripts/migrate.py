@@ -24,6 +24,9 @@ Usage:
   --no-style  skip step 6
   --core-tags 본문 footer에 전체 태그 줄 아래 빈 줄 하나를 두고 붙일 핵심
               태그 10~12개. --tags와 함께 항상 넘긴다.
+  --no-link-rewrite
+              본문의 티스토리 내부 링크를 네이버 이관본으로 바꾸지 않는다.
+              기본은 바꾼다 (naver_backlinks.py). 이관본이 없는 링크는 원본 유지.
   --title     override the post title (default: Tistory og:title).
               e.g. --title "[JS 강의] 1. 자바스크립트에 대한 개요"
 """
@@ -435,6 +438,16 @@ def main():
     if post["content"] is None:
         print("[ERROR] could not fetch post content")
         sys.exit(1)
+
+    # 본문 안의 티스토리 내부 링크를 네이버 이관본으로 돌린다. 이관본이 없는
+    # 링크는 그대로 둔다. 실패해도 마이그레이션은 계속한다 (링크만 원본 유지).
+    if "--no-link-rewrite" not in flags:
+        try:
+            import naver_backlinks as nb
+            nb.rewrite_internal_links(post["content"], blog_id=blog_id)
+        except Exception as e:
+            print(f"      [경고] 내부 링크 치환 실패, 원본 링크 유지: {e}")
+
     title = override_title or post.get("title")
     predownload_images(post["content"])
     chunks = m.split_content_into_chunks(

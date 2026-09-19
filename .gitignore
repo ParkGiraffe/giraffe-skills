@@ -15,3 +15,6 @@ tistory-to-naver/scripts/images/
 # pdf-ocr-epub: visionocr.swift에서 빌드되는 산출물 (첫 실행 때 자동 생성)
 pdf-ocr-epub/scripts/visionocr
 pdf-ocr-epub/scripts/*.dSYM/
+
+# naver_backlinks.py: 티스토리 번호 -> 네이버 logNo 조회 캐시 (파생물)
+tistory-to-naver/scripts/.backlink_cache.json
