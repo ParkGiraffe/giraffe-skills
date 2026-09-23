@@ -57,6 +57,9 @@ def resolve_images_dir(draft: pathlib.Path, flag_value: str | None) -> pathlib.P
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".tiff"}
 
 IMAGE_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$")
+# 한 줄에 사진 두 장 = 두 장 묶음(imageStrip2). 붙여넣기는 한 장씩 하고,
+# upload_to_editor.py의 묶음 패스가 에디터 문서 데이터에서 둘을 합친다.
+PAIR_RE = re.compile(r"^!\[[^\]]*\]\(([^)]+)\)\s+!\[[^\]]*\]\(([^)]+)\)\s*$")
 PLACEHOLDER_RE = re.compile(
     r"^\s*\[\s*(?:스크린샷|스샷|screenshot|img)\s*:\s*([^\]]+)\]\s*$", re.I,
 )
@@ -215,6 +218,18 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
       {"type": "html",  "content": "<p>...</p><p>...</p>..."}
       {"type": "image", "path": "/abs/path/to/file.jpg"}
     """
+    return _layout(md_text, images_dir)[0]
+
+
+def parse_to_ops(md_text: str, images_dir: pathlib.Path | None) -> list[tuple]:
+    """붙여넣기와 같은 여백 규칙으로 배치한 추상 목록. 에디터 문서 데이터 빌더(se_doc)가 쓴다.
+
+    ('blank', n) | ('hr',) | ('h', level, text) | ('p', text) | ('img', path)
+    """
+    return _layout(md_text, images_dir)[1]
+
+
+def _layout(md_text: str, images_dir: pathlib.Path | None):
     body = strip_frontmatter(md_text)
     lines = body.splitlines()
     files = list_images(images_dir)
@@ -270,10 +285,14 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
                 continue
             tokens.append(("h", level, text))
             continue
+        pair = PAIR_RE.match(line)
         img = IMAGE_RE.match(line)
-        if img:
+        if pair or img:
             flush_para()
-            ref = img.group(2)
+            refs = list(pair.groups()) if pair else [img.group(2)]
+        else:
+            refs = []
+        for ref in refs:
             if ref.startswith(("http://", "https://", "file://")):
                 tokens.append(("p", f"[원격 이미지: {ref}]"))
                 continue
@@ -286,6 +305,7 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
                 tokens.append(("img", str(matched.resolve())))
             else:
                 tokens.append(("p", f"[이미지 누락: {ref}]"))
+        if refs:
             continue
         ph = PLACEHOLDER_RE.match(line)
         if ph:
@@ -309,10 +329,12 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
 
     # ---- 2) 여백 규칙 적용해 element 나열 ----
     elements: list[tuple] = []   # ('html', s) | ('img', path)
+    ops: list[tuple] = []        # 같은 배치의 추상 목록 (parse_to_ops)
 
     def blanks(n):
         if n > 0:
             elements.append(("html", BLANK_P * n))
+            ops.append(("blank", n))
 
     prev_type = None        # 직전 토큰 종류
     prev_is_caption = False  # 직전 토큰이 캡션(사진 바로 뒤 문단)인지
@@ -326,12 +348,14 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             n = SPACE_BEFORE_SESSION if (nxt and nxt[0] == "h" and nxt[1] == 2) else SPACE_AFTER_TEXT
             blanks(n)
             elements.append(("html", "<hr>"))
+            ops.append(("hr",))
         elif typ == "h":
             level = tok[1]
             if level == 2 and prev_type != "hr":
                 # 세션 제목(##) 위에는 항상 구분선 — 기린님 블로그 작성법 (2026-07-07)
                 blanks(SPACE_BEFORE_SESSION)
                 elements.append(("html", "<hr>"))
+                ops.append(("hr",))
                 prev_type = "hr"
             if prev_type == "hr":
                 n = 0  # 구분선↔제목 딱 붙임 (여백은 이미 구분선 위에)
@@ -343,6 +367,7 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
                     n = max(n, SPACE_AFTER_TEXT)
             blanks(n)
             elements.append(("html", heading_html(tok[2], level)))
+            ops.append(("h", level, tok[2]))
         elif typ == "img":
             # caption-after(사진 먼저, 밑에 설명글). 직전이 설명글이면 [사진+설명] 블록이
             # 끝난 것이므로 4줄 띄우고 새 사진. 구분선/앞 사진 뒤엔 딱 붙임.
@@ -356,6 +381,7 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
                 n = 0
             blanks(n)
             elements.append(("img", tok[1]))
+            ops.append(("img", tok[1]))
         elif typ == "pgroup":  # 백슬래시 줄바꿈 그룹: 문단 여백 규칙은 그룹 단위로만
             if prev_type in ("img", "h"):
                 n = 0
@@ -366,6 +392,7 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             blanks(n)
             for seg in tok[1]:
                 elements.append(("html", body_html(seg)))
+                ops.append(("p", seg))
             typ = "p"  # 이후 여백 판단에는 일반 문단으로 취급
         elif typ == "li":  # 리스트 항목: 각각 별도 문단, 항목끼리는 딱 붙임
             if prev_type == "li":
@@ -376,6 +403,7 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
                 n = 0
             blanks(n)
             elements.append(("html", body_html(tok[1])))
+            ops.append(("p", tok[1]))
         else:  # 'p' (사진 아래 설명글)
             if prev_type in ("img", "h"):
                 n = 0                  # 설명글은 사진/소제목 바로 밑에 딱 붙임
@@ -385,6 +413,7 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
                 n = 0
             blanks(n)
             elements.append(("html", body_html(tok[1])))
+            ops.append(("p", tok[1]))
 
         prev_type = typ
         prev_is_caption = is_caption
@@ -402,7 +431,7 @@ def parse_to_chunks(md_text: str, images_dir: pathlib.Path | None) -> list[dict]
             chunks.append({"type": "image", "path": val})
     if buf:
         chunks.append({"type": "html", "content": "".join(buf)})
-    return chunks
+    return chunks, ops
 
 
 # ---------- clipboard (adapted verbatim from migrate_from_url.py) ----------
@@ -515,7 +544,8 @@ def main():
     # Sanity check: count placeholders in script.md
     placeholder_count = len(PLACEHOLDER_RE.findall(md_text) or [])
     inline_count = sum(1 for line in md_text.splitlines() if PLACEHOLDER_RE.match(line))
-    img_ref_count = sum(1 for line in md_text.splitlines() if IMAGE_RE.match(line))
+    img_ref_count = sum(2 if PAIR_RE.match(line) else 1 for line in md_text.splitlines()
+                        if PAIR_RE.match(line) or IMAGE_RE.match(line))
     expected_imgs = inline_count + img_ref_count
     available_imgs = len(list_images(images_dir))
 
