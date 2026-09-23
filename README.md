@@ -7,7 +7,7 @@
 `face-anonymizer`, `instagram-download`, `youtube-music-download`, `rebase-on-main` 정도가
 계정과 무관하게 동작합니다. 나머지는 포크해서 블로그 ID와 Notion DB ID를 바꿔야 합니다.
 
-## 수록 스킬 (25개)
+## 수록 스킬 (26개)
 
 ### 블로그 글쓰기
 
@@ -68,6 +68,7 @@
 |---|---|
 | [`figma-custom-extension`](./figma-custom-extension/) | Figma MCP로 디자인을 코드로 옮길 때 아이콘과 에셋의 실제 벡터를 확실히 뽑아내고, 결과를 Figma 스크린샷과 픽셀 단위로 대조합니다. |
 | [`rebase-on-main`](./rebase-on-main/) | 현재 브랜치를 `origin/main` 위로 리베이스합니다. main을 진실로 보고 충돌 시 main을 채택하며, 백업 브랜치를 만들고 `force-with-lease`만 허용합니다. |
+| [`pr-title`](./pr-title/) | PR 제목과 커밋 메시지를 `{대상} {액션}` 형식으로 씁니다. 대상은 도구의 공식 이름이나 한국어 도메인 용어로 적고, 액션은 설정·수정·추가·교체·마이그레이션 등 13가지 중에서 고릅니다. |
 
 ## 스킬 조합
 
@@ -106,7 +107,7 @@
 
 ```
 giraffe-skills/
-├── <skill>/SKILL.md      스킬 정의 25개
+├── <skill>/SKILL.md      스킬 정의 26개
 ├── <skill>/scripts/      그 스킬 전용 스크립트
 ├── _lib/                 여러 스킬이 공유하는 모듈
 ├── docs/                 설계 문서 (plans, specs)
