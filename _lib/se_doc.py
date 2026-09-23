@@ -217,6 +217,99 @@ def _body_nodes(text):
     return out
 
 
+def _run_nodes(runs):
+    """[{text, bold, italic, underline, link}] -> 본문 글자 노드. 링크는 urlLink로 단다."""
+    out = []
+    for r in runs:
+        st = {**_BODY_STYLE, "bold": bool(r.get("bold"))}
+        if r.get("italic"):
+            st["italic"] = True
+        if r.get("underline"):
+            st["underline"] = True
+        n = _node(r["text"], st)
+        if r.get("link"):
+            n["link"] = {"url": r["link"], "@ctype": "urlLink"}
+        out.append(n)
+    return out or [_node("", _BODY_STYLE)]
+
+
+_FS_RE = re.compile(r"font-size:\s*(\d+)px")
+
+
+def ops_from_html_chunks(chunks):
+    """붙여넣기용 청크({'type':'html'|'image'})를 문서 빌더 목록으로 바꾼다.
+
+    tistory-to-naver처럼 SmartEditor 붙여넣기용 HTML을 만드는 파이프라인이 쓴다.
+    <p> 하나가 문단 하나, <br>은 문단 나눔, 빈 <p>는 빈 줄, <hr>은 구분선이다.
+    24px 노란 바탕 문단은 ## 제목, 19px 문단은 ### 제목으로 본다.
+    """
+    from bs4 import BeautifulSoup, NavigableString
+    ops = []
+
+    def walk(node, st, runs):
+        for ch in node.children:
+            if isinstance(ch, NavigableString):
+                t = re.sub(r"[ \t\n\r]+", " ", str(ch))
+                if t:
+                    runs.append({**st, "text": t})
+                continue
+            if ch.name == "br":
+                runs.append({"br": True})
+                continue
+            nst = dict(st)
+            style = ch.get("style", "") or ""
+            if ch.name in ("b", "strong") or "font-weight:bold" in style.replace(" ", ""):
+                nst["bold"] = True
+            if "font-weight:normal" in style.replace(" ", ""):
+                nst["bold"] = False
+            if ch.name in ("i", "em"):
+                nst["italic"] = True
+            if ch.name == "u":
+                nst["underline"] = True
+            if ch.name == "a" and ch.get("href"):
+                nst["link"] = ch["href"]
+            walk(ch, nst, runs)
+
+    for c in chunks:
+        if c["type"] == "image":
+            ops.append(("img", c["path"]))
+            continue
+        soup = BeautifulSoup(c["content"], "html.parser")
+        for el in soup.find_all(["p", "hr"], recursive=False) or soup.find_all(["p", "hr"]):
+            if el.name == "hr":
+                ops.append(("hr",))
+                continue
+            text = el.get_text()
+            if not text.replace("\xa0", "").strip():
+                ops.append(("blank", 1))
+                continue
+            span = el.find("span", style=True)
+            fs = _FS_RE.search(span["style"]) if span else None
+            if fs and fs.group(1) == "24":
+                ops.append(("h", 2, text.strip()))
+                continue
+            if fs and fs.group(1) == "19":
+                ops.append(("h", 3, text.strip()))
+                continue
+            runs = []
+            walk(el, {}, runs)
+            line = []
+            for r in runs + [{"br": True}]:
+                if r.get("br"):
+                    if line:
+                        line[0]["text"] = line[0]["text"].lstrip()
+                        line[-1]["text"] = line[-1]["text"].rstrip()
+                        line = [x for x in line if x["text"]]
+                    ops.append(("rp", line) if line else ("blank", 1))
+                    line = []
+                else:
+                    line.append(r)
+            # 마지막 br 표식이 만든 빈 줄은 원래 없던 것이므로 걷어낸다
+            if ops and ops[-1] == ("blank", 1) and runs and not runs[-1].get("br"):
+                ops.pop()
+    return ops
+
+
 def skeleton_from_ops(ops):
     """paste_to_naver.parse_to_ops 결과를 컴포넌트 목록으로. 사진 자리는 {"__img": 번호}."""
     comps, paras, n_img = [], [], 0
@@ -234,6 +327,8 @@ def skeleton_from_ops(ops):
             paras.append(_para([_node(op[2], _H2_STYLE if op[1] <= 2 else _H3_STYLE)]))
         elif kind == "p":
             paras.append(_para(_body_nodes(op[1])))
+        elif kind == "rp":
+            paras.append(_para(_run_nodes(op[1])))
         elif kind == "hr":
             flush()
             comps.append({"id": _sid(), "layout": "line3", "@ctype": "horizontalLine"})

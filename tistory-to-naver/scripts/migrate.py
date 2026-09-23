@@ -480,11 +480,21 @@ def main():
     n_img = sum(1 for c in chunks if c["type"] == "image")
     print(f"      {len(chunks)} chunks ({n_img} images) | title: {title}")
 
+    # 기본은 에디터 문서 데이터로 제목·본문·사진을 한 번에 쓴다(_lib/se_doc). 키보드·클립보드를
+    # 안 쓰므로 크롬에서 다른 탭(방송 등)을 보고 있어도 된다 (2026-09-23 도입).
+    # 코드블록은 붙여넣기 뒤 주입하는 방식이라 [[CODE-n]]이 있으면 붙여넣기 경로로 간다.
+    sys.path.insert(0, os.path.join(REPO_ROOT, "_lib"))
+    import se_doc
+    has_code_marker = any("[[CODE-" in (c.get("content") or "") for c in chunks)
+    use_api = "--paste" not in flags and not has_code_marker
+    if has_code_marker and "--paste" not in flags:
+        print("      코드블록이 있어 붙여넣기 방식으로 진행")
+
     print("[2/6] preparing editor tab...")
     ensure_postwrite_tab(blog_id)
     chrome_js(JS_DISMISS_DIALOG)
     time.sleep(0.5)
-    if not wait_for_window_focus():
+    if not use_api and not wait_for_window_focus():
         print("[ERROR] Chrome window never got OS focus — is something else grabbing it?")
         sys.exit(1)
     n = int(chrome_js(JS_COMPONENT_COUNT))
@@ -503,7 +513,15 @@ def main():
                   "Re-run with --clear to wipe it.")
             sys.exit(3)
 
-    if title:
+    if use_api:
+        print("[3-4/6] 제목·본문·사진을 에디터 문서 데이터로 쓰기...")
+        try:
+            se_doc.write_document(chrome_js, title or "", se_doc.ops_from_html_chunks(chunks))
+        except Exception as e:
+            print(f"[ABORT] {e}")
+            sys.exit(5)
+        failures = []
+    if title and not use_api:
         print("[3/6] pasting title...")
         copy_text(title)
         ok = False
@@ -529,17 +547,16 @@ def main():
         if not ok:
             print("      [WARN] title did not register — set it manually at the end")
 
-    print("[4/6] pasting body chunks...")
-    c = json.loads(chrome_js(JS_BODY_COORDS))
-    click(c["x"], c["y"])
-    time.sleep(0.5)
-    failures = paste_chunks(chunks)
+    if not use_api:
+        print("[4/6] pasting body chunks...")
+        c = json.loads(chrome_js(JS_BODY_COORDS))
+        click(c["x"], c["y"])
+        time.sleep(0.5)
+        failures = paste_chunks(chunks)
 
     groups = strip_groups(chunks)
     if groups and not failures:
         # 붙여넣기로는 나란히 배치를 못 만들어 에디터 문서 데이터에서 다시 묶는다
-        sys.path.insert(0, os.path.join(REPO_ROOT, "_lib"))
-        import se_doc
         n_img = sum(1 for ch in chunks if ch["type"] == "image")
         r = se_doc.fix_media(chrome_js, expect_images=n_img, groups=groups)
         if r.get("ok"):
@@ -555,7 +572,6 @@ def main():
     except OSError:
         has_code = False
     if has_code:
-        import os
         # inject_code_blocks.py lives in the repo-shared _lib/ (also used by
         # the /blog and /notion-to-naver skills), two levels up from here.
         injector = os.path.join(

@@ -493,6 +493,39 @@ def _build_footer_html(source_url, published_iso, tags=None, core_tags=None):
     return ''.join(parts)
 
 
+def _grid_rows(element):
+    """티스토리 사진 그리드의 줄마다 strip 번호를 매긴다. {id(img): 번호}.
+
+    그리드(figure.imagegridblock) 안 사진은 data-widthpercent 합이 100이 될 때마다 줄이 바뀐다
+    (5장 = 50+50 / 33+33+33). 2~3장인 줄만 네이버 나란히 배치(imageStrip)로 묶고, 1장 줄과
+    그리드 밖 사진은 낱장으로 둔다. migrate.py가 이 번호로 _lib/se_doc에서 묶는다 (2026-09-23).
+    """
+    grids = list(element.select('.imagegridblock'))
+    if 'imagegridblock' in (element.get('class') or []):
+        grids.append(element)
+    out = {}
+    for g in grids:
+        rows, row, acc = [], [], 0.0
+        for sp in g.select('.image-container > span'):
+            row.append(sp)
+            try:
+                acc += float(sp.get('data-widthpercent') or 0)
+            except ValueError:
+                pass
+            if acc >= 99.5:
+                rows.append(row)
+                row, acc = [], 0.0
+        if row:
+            rows.append(row)
+        for ri, r in enumerate(rows):
+            if 2 <= len(r) <= 3:
+                for sp in r:
+                    img = sp.find('img')
+                    if img is not None:
+                        out[id(img)] = f"{id(g)}-{ri}"
+    return out
+
+
 def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=None,
                              core_tags=None):
     """Split the parsed Tistory content into ordered chunks for the paste loop.
@@ -575,13 +608,9 @@ def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=No
         # Images \u2014 split out as separate paste chunks so Naver uploads each
         imgs = element.find_all('img')
         if imgs:
-            # 티스토리 사진 그리드(한 줄에 2~3장)는 네이버에서도 나란히(imageStrip) 두도록
-            # 같은 strip 번호를 달아 둔다. 붙여넣은 뒤 migrate.py가 _lib/se_doc으로 묶는다 (2026-09-23)
-            is_grid = 2 <= len(imgs) <= 3 and (
-                'imagegridblock' in (element.get('class') or [])
-                or element.select_one('.imagegridblock') is not None)
-            strip_id = id(element) if is_grid else None
+            strip_of = _grid_rows(element)
             for img in imgs:
+                strip_id = strip_of.get(id(img))
                 if current_html.strip():
                     chunks.append({'type': 'html', 'content': current_html})
                     current_html = ""

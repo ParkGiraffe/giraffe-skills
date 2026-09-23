@@ -345,8 +345,11 @@ HTML의 `window.T.entryInfo = {"categoryLabel":"..."}` 로 판정한다.
 
 **단, 코드블록은 in-process 주입이 됨** (2026-06-11 실측): osascript `execute javascript` (Chrome "Apple Events의 자바스크립트 허용" 필요)로 페이지 안에서 툴바 `button[data-name=code]` 를 클릭하면 에디터 자신의 핸들러가 정상 컴포넌트를 만들고, `.se-code-source-editor` textarea 에 native value setter + `input` 이벤트로 코드를 넣으면 모델이 수용함. 단 SE 는 합성(synthetic) paste/insertText 를 `isTrusted` 로 거부하므로, 캐럿 위치 잡기(트리플클릭)와 placeholder 삭제(Backspace)는 Quartz CGEvent 실제 입력으로 쏴야 함. 이 조합이 `_lib/inject_code_blocks.py` (Pass 2). 같은 원리로 소제목도 native 화 가능하지만 현재는 코드블록만 적용.
 
-- 티스토리 사진 그리드(`imagegridblock`, 한 줄에 2~3장)는 낱장으로 붙여넣은 뒤 `_lib/se_doc.py`가
-  네이버의 나란히 배치(imageStrip)로 다시 묶는다. 사진 수가 어긋나면 묶지 않고 낱장으로 둔다(2026-09-23).
+- 기본 경로는 붙여넣기가 아니라 에디터 문서 데이터 직접 쓰기다(`_lib/se_doc.py`, 2026-09-23). 키보드·클립보드를
+  쓰지 않아 크롬에서 방송을 보거나 다른 창을 써도 된다. 코드블록(`[[CODE-n]]`)이 있거나 `--paste`를 주면
+  예전 붙여넣기 경로로 간다.
+- 티스토리 사진 그리드(`imagegridblock`)는 `data-widthpercent` 합이 100이 되는 곳마다 줄을 나눠, 2~3장 줄을
+  네이버의 나란히 배치(imageStrip)로 묶는다(5장 그리드 = 2장 줄 + 3장 줄). 사진 수가 어긋나면 낱장으로 둔다.
 
 ## 자동 footer 첨부
 
