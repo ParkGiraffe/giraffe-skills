@@ -33,10 +33,13 @@ Usage:
 
 import base64
 import json
+import os
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import Quartz
 
@@ -326,6 +329,25 @@ def predownload_images(soup):
         list(ex.map(m.download_image, urls))
 
 
+def strip_groups(chunks):
+    """이미지 청크의 strip 표시를 [첫 사진 번호, 장수] 목록으로 바꾼다."""
+    groups, idx, cur, cur_id = [], 0, None, None
+    for ch in chunks:
+        if ch["type"] != "image":
+            continue
+        sid = ch.get("strip")
+        if sid is not None and sid == cur_id:
+            cur[1] += 1
+        else:
+            if cur and cur[1] >= 2:
+                groups.append(cur)
+            cur, cur_id = ([idx, 1], sid) if sid is not None else (None, None)
+        idx += 1
+    if cur and cur[1] >= 2:
+        groups.append(cur)
+    return groups
+
+
 def paste_chunks(chunks):
     def counts():
         try:
@@ -512,6 +534,19 @@ def main():
     click(c["x"], c["y"])
     time.sleep(0.5)
     failures = paste_chunks(chunks)
+
+    groups = strip_groups(chunks)
+    if groups and not failures:
+        # 붙여넣기로는 나란히 배치를 못 만들어 에디터 문서 데이터에서 다시 묶는다
+        sys.path.insert(0, os.path.join(REPO_ROOT, "_lib"))
+        import se_doc
+        n_img = sum(1 for ch in chunks if ch["type"] == "image")
+        r = se_doc.fix_media(chrome_js, expect_images=n_img, groups=groups)
+        if r.get("ok"):
+            print(f"      사진 그리드 {len(groups)}개 중 {r['strips']}개를 나란히 묶음"
+                  + (f", 못 묶음 {r['skipped']}" if r["skipped"] else ""))
+        else:
+            print(f"      [WARN] 사진 그리드 묶기 건너뜀(낱장으로 둠): {r.get('err')}")
 
     print("[5/6] injecting code blocks...")
     try:

@@ -575,6 +575,12 @@ def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=No
         # Images \u2014 split out as separate paste chunks so Naver uploads each
         imgs = element.find_all('img')
         if imgs:
+            # 티스토리 사진 그리드(한 줄에 2~3장)는 네이버에서도 나란히(imageStrip) 두도록
+            # 같은 strip 번호를 달아 둔다. 붙여넣은 뒤 migrate.py가 _lib/se_doc으로 묶는다 (2026-09-23)
+            is_grid = 2 <= len(imgs) <= 3 and (
+                'imagegridblock' in (element.get('class') or [])
+                or element.select_one('.imagegridblock') is not None)
+            strip_id = id(element) if is_grid else None
             for img in imgs:
                 if current_html.strip():
                     chunks.append({'type': 'html', 'content': current_html})
@@ -586,7 +592,10 @@ def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=No
                     src = 'https:' + src
                 local_path = download_image(src)
                 if local_path:
-                    chunks.append({'type': 'image', 'path': local_path})
+                    chunk = {'type': 'image', 'path': local_path}
+                    if strip_id is not None:
+                        chunk['strip'] = strip_id
+                    chunks.append(chunk)
             continue
 
         # Generic block \u2014 preserve inline <b>/<strong> + <br>, emit body paragraph
