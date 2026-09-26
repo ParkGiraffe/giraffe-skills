@@ -29,7 +29,12 @@ import html as H
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "blog" / "scripts"))
 import paste_to_naver as PN          # copy_html_to_clipboard / copy_image_file_to_clipboard
+sys.path.insert(0, str(REPO / "_lib"))
+import se_doc                        # 붙여넣기 뒤 원본의 사진 묶음(imageStrip) 복원
 import Quartz
+
+sys.path.insert(0, str(REPO / "_lib"))
+import chrome_window  # noqa: E402
 
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
@@ -318,7 +323,8 @@ def render_paragraph(p_attrs, p_inner):
 def build_chunks(html):
     """([('html', str, plains) | ('img', path)], stats, hl_texts) — 원본 순서 그대로."""
     chunks, unhandled, hl_texts = [], {}, []
-    stats = {"img": 0, "gif": 0, "sticker": 0, "hr": 0, "para": 0, "spacer": 0, "fail": []}
+    stats = {"img": 0, "gif": 0, "sticker": 0, "hr": 0, "para": 0, "spacer": 0, "fail": [],
+             "groups": []}   # groups: 원본 imageStrip의 [첫 사진 번호, 장수]
     for kind, blk in components(html):
         if kind == "se-documentTitle":
             continue
@@ -327,6 +333,7 @@ def build_chunks(html):
             stats["hr"] += 1
             continue
         if kind in ("se-image", "se-imageStrip", "se-sticker"):
+            first = stats["img"]
             for dom, path in media_in(blk):
                 f = download_original(dom, path)
                 if f:
@@ -338,6 +345,8 @@ def build_chunks(html):
                         stats["sticker"] += 1
                 else:
                     stats["fail"].append(f"{dom}/{path[:60]}")
+            if kind == "se-imageStrip" and stats["img"] - first >= 2:
+                stats["groups"].append([first, stats["img"] - first])
             caps, plains = [], []
             for pm in P_RE.finditer(blk):                 # 미디어 캡션("짤 출처" 등)
                 ph, pl, hl = render_paragraph(pm.group(1), pm.group(2))
@@ -397,11 +406,9 @@ def verify_chunks_vs_source(html, chunks):
 
 # ---------------------------------------------------------------- 에디터 조작
 def open_fresh_editor(blog_id):
-    osa(f'''tell application "Google Chrome"
-      activate
-      make new tab at end of tabs of window 1 with properties {{URL:"https://blog.naver.com/{blog_id}/postwrite"}}
-      set active tab index of window 1 to (count of tabs of window 1)
-    end tell''')
+    # 방송(치지직 등)이 틀어진 창은 피해 새 탭을 열고 그 창을 맨 앞으로 올린다.
+    # 이 스크립트의 chrome_js와 좌표 클릭은 window 1의 활성 탭을 보므로 앞으로 올려야 맞는다.
+    chrome_window.open_tab_front(f"https://blog.naver.com/{blog_id}/postwrite")
     time.sleep(6)
     chrome_js('(function(){var b=Array.from(document.querySelectorAll("button")).find(function(x){return x.textContent.trim()==="취소";});if(b)b.click();return "ok";})()')
     time.sleep(1)
@@ -739,6 +746,7 @@ def verify_editor(chunks, hl_count):
     editor = json.loads(chrome_js(
         '(function(){var out=[];document.querySelectorAll(".se-component").forEach(function(c){var cl=c.className;'
         'if(cl.indexOf("se-documentTitle")>=0)return;'
+        'if(cl.indexOf("se-imageStrip")>=0){var n=c.querySelectorAll("img").length||1;for(var i=0;i<n;i++)out.push({k:"img"});return;}'
         'if(cl.indexOf("se-image")>=0){out.push({k:"img"});return;}'
         'if(cl.indexOf("se-horizontalLine")>=0){out.push({k:"hr"});return;}'
         'if(cl.indexOf("se-text")>=0){out.push({k:"txt",t:(c.innerText||"")});}});'
@@ -838,6 +846,14 @@ def main():
     verify_coords()
     focus_body()
     paste_all(chunks)
+    if stats["groups"]:
+        # 붙여넣기로는 나란히 배치를 만들 수 없어 에디터 문서 데이터에서 다시 묶는다 (2026-09-23)
+        r = se_doc.fix_media(chrome_js, expect_images=stats["img"], groups=stats["groups"])
+        if r.get("ok"):
+            print(f"[strip] 원본 묶음 {len(stats['groups'])}개 중 {r['strips']}개 복원"
+                  + (f", 못 묶음 {r['skipped']}" if r["skipped"] else ""))
+        else:
+            print(f"[strip] 복원 건너뜀(낱장으로 둠): {r.get('err')}")
     style_pass()
     highlight_pass(hl_texts)
     set_title(title)

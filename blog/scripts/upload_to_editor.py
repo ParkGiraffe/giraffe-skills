@@ -18,7 +18,7 @@ blog/scripts/paste_to_naver.py는 "본문 붙여넣기"만 한다. 그 앞뒤로
 남의 탭을 집는다). 탭을 다른 창으로 옮겨도 id는 유지되므로 창 순서에 영향받지 않는다.
 
 사용:
-  upload_to_editor.py <draft_dir>
+  upload_to_editor.py <draft_dir> [--save]   (--save: 마지막에 상단 "저장"으로 임시저장)
 
 draft_dir 요구사항:
   script.md   본문 (blog 스킬 형식)
@@ -33,8 +33,11 @@ import pathlib
 
 REPO = str(pathlib.Path(__file__).resolve().parents[2])
 sys.path.insert(0, f"{REPO}/tistory-to-naver/scripts")
+sys.path.insert(0, f"{REPO}/_lib")
 
 import migrate as M
+import se_doc
+import chrome_window
 
 KEY_B = 11
 
@@ -80,6 +83,22 @@ JS_VIDEO_COUNT = ("String(document.querySelectorAll('.se-component.se-video, "
                   ".se-component.se-videoDetail').length)")
 
 
+# 상단 "저장" 버튼 = 임시저장. 클래스 뒤 해시는 빌드마다 바뀌므로 접두어로 찾는다 (2026-09-23)
+JS_SAVE_CLICK = """
+(() => { const b = document.querySelector('button[class^="save_btn"], button[class*=" save_btn"]');
+  if (!b) return 'none'; b.click(); return 'clicked'; })()"""
+JS_SAVE_COUNT = """
+(() => { const b = document.querySelector('button[class^="save_count_btn"], button[class*=" save_count_btn"]');
+  return b ? b.getAttribute('aria-label') : 'none'; })()"""
+JS_SAVE_BTN_TEXT = """
+(() => { const b = document.querySelector('button[class^="save_btn"], button[class*=" save_btn"]');
+  return b ? b.innerText.replace(/\\s+/g, ' ').trim() : 'none'; })()"""
+
+
+# 문서 빌더(se_doc.skeleton_from_ops)가 옮기지 못하는 인라인 서식. 하나라도 있으면 붙여넣기 경로로 간다
+RICH_INLINE_RE = re.compile(r"`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\)|<u>|<mark>|<span style=|(?<![*])\*[^*\n]+\*(?![*])")
+
+
 CURRENT_TAB_ID = None   # open_fresh_tab이 연 탭. upload_video.py에 환경변수로 넘긴다
 
 
@@ -114,30 +133,18 @@ def open_fresh_tab():
 
     그 탭에는 사용자가 직접 쓰던 원고가 들어 있을 수 있고, 한 번 비우면 되돌릴 방법이 없다.
     임시저장도 슬롯이 몇 개뿐이라 안전망이 못 된다. 새로 여는 편이 언제나 싸다.
+
+    창은 _lib/chrome_window가 고른다. 치지직 등 방송이 틀어진 창은 피한다. 예전에는
+    window 1에 고정으로 열어 방송 창의 활성 탭을 빼앗았다(2026-09-26).
     """
-    url = M.POSTWRITE_URL.format(blog_id=M.BLOG_ID)
-    M.osa('tell application "Google Chrome" to activate')
-    time.sleep(0.5)
-    M.osa('tell application "Google Chrome" to tell window 1 to '
-          f'make new tab at end of tabs with properties {{URL:"{url}"}}')
-    time.sleep(1.0)
-    tab_id = M.osa('tell application "Google Chrome" to get id of last tab of window 1')
-    M.osa('tell application "Google Chrome" to set active tab index of window 1 to '
-          '(count of tabs of window 1)')
+    try:
+        tab_id, js = chrome_window.open_postwrite_tab(M.BLOG_ID)
+    except RuntimeError as e:
+        print(f"[ABORT] {e}"); sys.exit(2)
     # 이후 M의 모든 JS 호출(style_pass 등)이 이 탭만 보게 못박는다
-    M.chrome_js = make_chrome_js(tab_id)
+    M.chrome_js = js
     global CURRENT_TAB_ID
     CURRENT_TAB_ID = tab_id
-    for _ in range(90):   # 에디터 로딩이 30초를 넘기는 경우가 있어 90초까지 기다린다 (2026-09-03)
-        time.sleep(1.0)
-        try:
-            if M.chrome_js("document.querySelector('.se-canvas') ? 'ready' : 'loading'") == "ready":
-                break
-        except Exception:
-            pass
-    else:
-        print("[ABORT] 글쓰기 탭이 안 뜸"); sys.exit(2)
-    print(f"      새 탭 id={tab_id}")
     time.sleep(0.5)
 
 
@@ -222,13 +229,22 @@ def main():
     meta = json.loads(open(f"{draft}/meta.json", encoding="utf-8").read())
     title = meta["title_candidates"][0]
 
-    print("[1/7] 새 글쓰기 탭 열기")
+    # 기본은 에디터 API로 문서를 통째로 쓴다(se_doc.write_document). 포커스·클립보드를 안 쓰므로
+    # 업로드 중 다른 창을 만져도 글이 빠지지 않는다. --paste는 예전 클립보드 붙여넣기 경로다.
+    use_paste = "--paste" in sys.argv
+    body = open(f"{draft}/script.md", encoding="utf-8").read()
+    if not use_paste and RICH_INLINE_RE.search(re.sub(r"<!--.*?-->", "", body, flags=re.S)):
+        # 문서 빌더는 굵게(**)만 옮긴다. 코드·링크·밑줄·색 같은 서식은 붙여넣기 경로가 살린다.
+        print("      본문에 인라인 서식(코드·링크·밑줄·색·기울임)이 있어 붙여넣기 방식으로 올린다")
+        use_paste = True
+
+    print("[1/8] 새 글쓰기 탭 열기")
     open_fresh_tab()
     M.chrome_js(M.JS_DISMISS_DIALOG)   # "작성 중인 글" 복구 물음은 취소
     time.sleep(0.6)
-    if not guard():
+    if use_paste and not guard():
         print(f"[ERROR] 전면 앱이 Chrome이 아님({frontmost()}). 중단."); sys.exit(1)
-    if not M.wait_for_window_focus(retries=2):
+    if use_paste and not M.wait_for_window_focus(retries=2):
         # 창은 전면인데 페이지가 키보드 포커스를 못 받은 경우가 있다(다른 앱 창을
         # 닫은 직후 등). 본문을 실제로 클릭하면 잡힌다.
         print("      페이지 포커스 없음 -> 본문 클릭으로 확보 시도")
@@ -245,7 +261,68 @@ def main():
         # 남의 원고일 수 있으니 절대 지우지 않고 멈춘다.
         print("[ABORT] 새 탭인데 본문이 비어 있지 않음. 사람이 확인할 것."); sys.exit(3)
 
-    print("[2/7] 제목 입력")
+    if not use_paste:
+        write_via_api(draft, meta, title)
+    else:
+        paste_title_and_body(draft, meta, title)
+    finish(draft, meta, use_paste)
+
+
+def place_videos_api(draft, meta):
+    """파일 선택 창 없이 영상을 올리고, 각 영상을 자기 [영상 자리] 문단으로 옮긴다."""
+    slots = re.findall(r"^\s*\[영상 자리\s*:\s*([^\]]+)\]\s*$",
+                       open(f"{draft}/script.md", encoding="utf-8").read(), re.M)
+    if not slots:
+        print("      영상 자리 없음"); return
+    titles = {v.get("file"): v.get("title") for v in meta.get("videos", [])}
+    folder = resolve_videos_folder(draft, meta.get("videos_folder")) or pathlib.Path(draft)
+    items = []
+    for f in (x.strip() for x in slots):
+        if not (folder / f).exists():
+            print(f"[ABORT] 영상 파일 없음: {folder / f}"); sys.exit(6)
+        items.append({"file": f, "title": titles.get(f) or f.split("_", 2)[-1].rsplit(".", 1)[0]})
+    if len({i["title"] for i in items}) != len(items):
+        print("[ABORT] 영상 제목이 겹침. 제목으로 영상을 찾아 옮기므로 모두 달라야 한다"); sys.exit(6)
+    srv, port = se_doc.serve_dir(folder)
+    try:
+        for it in items:
+            se_doc.upload_video(M.chrome_js, port, it["file"], it["title"])
+    except Exception as e:
+        print(f"[ABORT] 영상 업로드 실패: {e}"); sys.exit(6)
+    finally:
+        srv.shutdown()
+    r = se_doc.place_videos_at_slots(M.chrome_js, items)
+    if not r.get("ok"):
+        print(f"[ABORT] 영상 배치 실패: {r.get('err')}"); sys.exit(6)
+    print(f"      영상 {len(r['placed'])}개를 자리에 배치")
+
+
+def write_via_api(draft, meta, title):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("paste_to_naver", f"{REPO}/blog/scripts/paste_to_naver.py")
+    PN = importlib.util.module_from_spec(spec); spec.loader.exec_module(PN)
+    md = open(f"{draft}/script.md", encoding="utf-8").read()
+    images_dir = PN.resolve_images_dir(pathlib.Path(draft), None)
+    ops = PN.parse_to_ops(md, images_dir)
+    missing = [o[1] for o in ops if o[0] == "p" and o[1].startswith("[이미지 누락")]
+    if missing:
+        print(f"[ABORT] 대본의 사진 파일이 없음: {missing}"); sys.exit(5)
+    print(f"[2-3/8] 제목·본문을 에디터 문서 데이터로 쓰기 (사진 {meta['images']['count']}장)")
+    try:
+        n = se_doc.write_document(M.chrome_js, title, ops)
+    except Exception as e:
+        print(f"[ABORT] {e}"); sys.exit(5)
+    norm = lambda s: s.replace("\xa0", " ").strip()
+    got = norm(M.chrome_js(M.JS_TITLE_TEXT))
+    print(f"      제목: {got}")
+    if got != norm(title):
+        print("[ABORT] 제목이 다르게 들어감."); sys.exit(4)
+    if n != meta["images"]["count"]:
+        print(f"[ABORT] 사진 {n}장 != meta {meta['images']['count']}장"); sys.exit(5)
+
+
+def paste_title_and_body(draft, meta, title):
+    print("[2/8] 제목 입력")
     M.copy_text(title)
     ok = False
     for _ in range(3):
@@ -264,7 +341,7 @@ def main():
         print("[ABORT] 제목 입력 실패. 중단."); sys.exit(4)
     print(f"      {title}")
 
-    print(f"[3/7] 본문 붙여넣기 (사진 {meta['images']['count']}장)")
+    print(f"[3/8] 본문 붙여넣기 (사진 {meta['images']['count']}장)")
     if not guard():
         print(f"[ERROR] 전면 앱이 Chrome이 아님({frontmost()}). 중단."); sys.exit(1)
     c = json.loads(M.chrome_js(M.JS_BODY_COORDS))
@@ -276,8 +353,14 @@ def main():
     print(f"      이미지 {before['img']} -> {after['img']} / 문단 {before['p']} -> {after['p']}")
     if after["img"] - before["img"] == 0:
         print("[ABORT] 이미지가 하나도 안 들어감."); sys.exit(5)
+    if after["img"] - before["img"] != meta["images"]["count"]:
+        # 포커스가 중간에 다른 창으로 넘어가면 뒤쪽 조각이 통째로 빠진다 (2026-09-23)
+        print(f"[ABORT] 사진 {after['img'] - before['img']}장만 들어감 (대본 {meta['images']['count']}장)."); sys.exit(5)
 
-    print("[4/7] 여행 날짜 줄 볼드")
+
+def finish(draft, meta, use_paste=True):
+
+    print("[4/8] 여행 날짜 줄 볼드")
     r = M.chrome_js(JS_DATE_LINE)
     if r == "none":
         print("      날짜 줄 없음, 건너뜀")
@@ -290,19 +373,47 @@ def main():
         print(f"      볼드 적용: {M.chrome_js(JS_DATE_BOLD)}")
         M.chrome_js(M.JS_DESELECT)
 
-    print("[5/7] 영상 자리 채우기")
-    place_videos(draft, meta)
+    print("[5/8] 영상 자리 채우기")
+    if use_paste:
+        place_videos(draft, meta)
+    else:
+        place_videos_api(draft, meta)
 
-    print("[6/7] 스타일 패스 (구분선 line3+가운데, 사진 가운데)")
+    print("[6/8] 두 장 묶음, 영상 순서 (에디터 문서 데이터)")
+    script = open(f"{draft}/script.md", encoding="utf-8").read()
+    titles = {v.get("file"): v.get("title") for v in meta.get("videos", [])}
+    plan = se_doc.plan_from_markdown(script, titles)
+    rep = se_doc.fix_media(M.chrome_js, plan["expect_images"], plan["pairs"], plan["videos"])
+    if not rep.get("ok"):
+        print(f"[ABORT] 문서 패스 실패: {rep.get('err')}"); sys.exit(7)
+    print(f"      묶음 {rep['strips']}/{len(plan['pairs'])}개, 옮긴 영상 {rep['moved'] or '없음'}")
+    if rep.get("video_check"):
+        print(f"      [WARN] 영상 순서 검증 못 함: {rep['video_check']}")
+    if rep["skipped"]:
+        print(f"      [WARN] 묶지 못한 쌍: {rep['skipped']}")
+
+    print("[7/8] 스타일 패스 (구분선 line3+가운데, 사진 가운데)")
     styled = M.style_pass()
     print(f"      구분선 {styled['hr']}개, 사진 {styled['img']}개")
 
-    print("[7/7] 최종 확인")
+    print("[8/8] 최종 확인")
     time.sleep(1.5)
     fin = counts()
     body = M.chrome_js("document.querySelector('.se-canvas').innerText")
     print(f"      이미지 {fin['img']}장 / 문단 {fin['p']}개")
     print(f"      '[영상 자리' {body.count('[영상 자리')}회 / '[이미지 누락' {body.count('[이미지 누락')}회")
+    seq = se_doc.media_sequence(M.chrome_js)
+    if seq == plan["sequence"]:
+        print(f"      미디어 순서 대본과 일치 ({len(seq)}개)")
+    else:
+        print(f"[WARN] 미디어 순서 불일치\n      대본 {' '.join(plan['sequence'])}\n      문서 {' '.join(seq)}")
+    if "--save" in sys.argv:
+        print("[+] 임시저장")
+        if M.chrome_js(JS_SAVE_CLICK) != "clicked":
+            print("[WARN] 저장 버튼을 못 찾음. 직접 저장할 것.")
+        else:
+            time.sleep(3.0)
+            print(f"      임시저장 목록: {M.chrome_js(JS_SAVE_COUNT)}")
     print("\n발행 버튼은 사용자가 직접 누른다.")
 
 

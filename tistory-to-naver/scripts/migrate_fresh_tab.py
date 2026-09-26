@@ -25,72 +25,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import migrate as M
 
-# 이 패턴이 URL에 있는 탭이 하나라도 있는 창은 "사용자가 보고 있는 창"으로 보고
-# 새 탭을 열지 않는다. 방송·영상은 탭이 바뀌면 시청이 끊긴다.
-MEDIA_PATTERNS = (
-    "chzzk.naver.com", "youtube.com/watch", "youtu.be/", "twitch.tv",
-    "tv.naver.com", "netflix.com", "tving.com", "wavve.com", "laftel.net",
-    "disneyplus.com", "coupangplay.com",
-)
+# 창 고르기(방송 탭 있는 창 피하기)는 리포 공용 _lib/chrome_window.py가 정본이다.
+# blog/upload_to_editor.py 등 새 탭을 여는 다른 스크립트도 같은 규칙을 쓴다.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "_lib"))
+from chrome_window import MEDIA_PATTERNS, pick_target_window  # noqa: E402,F401
 
 # 창은 최전면으로 올리면 index가 바뀐다. 그래서 index가 아니라 안정적인
 # window id로 대상 창을 붙든다.
 TARGET_WIN = None  # pick_target_window()가 채운다 (Chrome window id)
-
-
-def _windows():
-    """[(window id, [탭 URL...])] 반환."""
-    out = M.osa('tell application "Google Chrome"',
-                'set s to ""',
-                "repeat with w in windows",
-                'set s to s & "|W|" & (id of w) & "|U|"',
-                "repeat with t in tabs of w",
-                'set s to s & (URL of t) & "|T|"',
-                "end repeat",
-                "end repeat",
-                "return s",
-                "end tell")
-    wins = []
-    for chunk in (out or "").split("|W|")[1:]:
-        wid, _, rest = chunk.partition("|U|")
-        wins.append((int(wid.strip()), [u for u in rest.split("|T|") if u]))
-    return wins
-
-
-def _new_window():
-    M.osa('tell application "Google Chrome" to make new window')
-    time.sleep(1)
-    return _windows()[-1][0]
-
-
-def pick_target_window(explicit=None):
-    """새 탭을 열 Chrome 창의 window id를 고른다. 마땅치 않으면 새 창을 만든다.
-
-    explicit은 사용자가 보는 창 번호(1부터)라 index로 받아 id로 변환한다.
-    """
-    wins = _windows()
-    if explicit:
-        if explicit < 1 or explicit > len(wins):
-            sys.exit(f"ABORT: --chrome-window {explicit} 은 없는 창 "
-                     f"(현재 {len(wins)}개)")
-        wid = wins[explicit - 1][0]
-        print(f"[프렙] 창 {explicit} 지정됨 (id {wid})")
-        return wid
-
-    if not wins:
-        wid = _new_window()
-        print(f"[프렙] 열린 창이 없어 새 창 생성 (id {wid})")
-        return wid
-
-    for idx, (wid, urls) in enumerate(wins, start=1):
-        if not any(p in u for u in urls for p in MEDIA_PATTERNS):
-            print(f"[프렙] 창 {idx} 선택 (id {wid}, 재생 중일 탭 없음, "
-                  f"탭 {len(urls)}개)")
-            return wid
-
-    wid = _new_window()
-    print(f"[프렙] 모든 창에 재생 탭이 있어 새 창 생성 (id {wid})")
-    return wid
 
 
 def chrome_js_last(js, timeout=15):

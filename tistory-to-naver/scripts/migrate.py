@@ -29,14 +29,19 @@ Usage:
               기본은 바꾼다 (naver_backlinks.py). 이관본이 없는 링크는 원본 유지.
   --title     override the post title (default: Tistory og:title).
               e.g. --title "[JS 강의] 1. 자바스크립트에 대한 개요"
+  --allow-missing
+              원본 문단이 변환 결과에 빠져도 멈추지 않는다. 기본은 exit 6으로 멈춘다.
 """
 
 import base64
 import json
+import os
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import Quartz
 
@@ -108,8 +113,10 @@ def raise_postwrite_window():
 def ensure_postwrite_tab(blog_id):
     if chrome_js("'ping'") == "NO_TAB":
         url = POSTWRITE_URL.format(blog_id=blog_id)
-        osa('tell application "Google Chrome" to tell window 1 to make new tab '
-            f'at end of tabs with properties {{URL:"{url}"}}')
+        # 방송(치지직 등)이 틀어진 창은 피한다 (_lib/chrome_window)
+        sys.path.insert(0, os.path.join(REPO_ROOT, "_lib"))
+        import chrome_window
+        chrome_window.open_tab_front(url)
         for _ in range(20):
             time.sleep(1)
             if chrome_js("document.querySelector('.se-canvas') ? 'ready' : 'loading'") == "ready":
@@ -326,6 +333,25 @@ def predownload_images(soup):
         list(ex.map(m.download_image, urls))
 
 
+def strip_groups(chunks):
+    """이미지 청크의 strip 표시를 [첫 사진 번호, 장수] 목록으로 바꾼다."""
+    groups, idx, cur, cur_id = [], 0, None, None
+    for ch in chunks:
+        if ch["type"] != "image":
+            continue
+        sid = ch.get("strip")
+        if sid is not None and sid == cur_id:
+            cur[1] += 1
+        else:
+            if cur and cur[1] >= 2:
+                groups.append(cur)
+            cur, cur_id = ([idx, 1], sid) if sid is not None else (None, None)
+        idx += 1
+    if cur and cur[1] >= 2:
+        groups.append(cur)
+    return groups
+
+
 def paste_chunks(chunks):
     def counts():
         try:
@@ -458,11 +484,32 @@ def main():
     n_img = sum(1 for c in chunks if c["type"] == "image")
     print(f"      {len(chunks)} chunks ({n_img} images) | title: {title}")
 
+    # 원본 문단이 청크에 다 들어갔는지 에디터를 건드리기 전에 확인한다. 사진 수만 세면
+    # 글이 통째로 빠져도 DONE이 뜬다(2026-09-25 티스토리 632: 더보기 블록 글 7문단 누락).
+    missing = m.missing_text(post["content"], chunks)
+    if missing:
+        print(f"[ABORT] 원본 문단 {len(missing)}개가 변환 결과에 없음:")
+        for t in missing[:10]:
+            print(f"        - {t[:80]}")
+        if "--allow-missing" not in flags:
+            print("        변환기를 고치거나, 빠져도 되는 글이면 --allow-missing 으로 다시 실행")
+            sys.exit(6)
+
+    # 기본은 에디터 문서 데이터로 제목·본문·사진을 한 번에 쓴다(_lib/se_doc). 키보드·클립보드를
+    # 안 쓰므로 크롬에서 다른 탭(방송 등)을 보고 있어도 된다 (2026-09-23 도입).
+    # 코드블록은 붙여넣기 뒤 주입하는 방식이라 [[CODE-n]]이 있으면 붙여넣기 경로로 간다.
+    sys.path.insert(0, os.path.join(REPO_ROOT, "_lib"))
+    import se_doc
+    has_code_marker = any("[[CODE-" in (c.get("content") or "") for c in chunks)
+    use_api = "--paste" not in flags and not has_code_marker
+    if has_code_marker and "--paste" not in flags:
+        print("      코드블록이 있어 붙여넣기 방식으로 진행")
+
     print("[2/6] preparing editor tab...")
     ensure_postwrite_tab(blog_id)
     chrome_js(JS_DISMISS_DIALOG)
     time.sleep(0.5)
-    if not wait_for_window_focus():
+    if not use_api and not wait_for_window_focus():
         print("[ERROR] Chrome window never got OS focus — is something else grabbing it?")
         sys.exit(1)
     n = int(chrome_js(JS_COMPONENT_COUNT))
@@ -481,7 +528,15 @@ def main():
                   "Re-run with --clear to wipe it.")
             sys.exit(3)
 
-    if title:
+    if use_api:
+        print("[3-4/6] 제목·본문·사진을 에디터 문서 데이터로 쓰기...")
+        try:
+            se_doc.write_document(chrome_js, title or "", se_doc.ops_from_html_chunks(chunks))
+        except Exception as e:
+            print(f"[ABORT] {e}")
+            sys.exit(5)
+        failures = []
+    if title and not use_api:
         print("[3/6] pasting title...")
         copy_text(title)
         ok = False
@@ -507,11 +562,23 @@ def main():
         if not ok:
             print("      [WARN] title did not register — set it manually at the end")
 
-    print("[4/6] pasting body chunks...")
-    c = json.loads(chrome_js(JS_BODY_COORDS))
-    click(c["x"], c["y"])
-    time.sleep(0.5)
-    failures = paste_chunks(chunks)
+    if not use_api:
+        print("[4/6] pasting body chunks...")
+        c = json.loads(chrome_js(JS_BODY_COORDS))
+        click(c["x"], c["y"])
+        time.sleep(0.5)
+        failures = paste_chunks(chunks)
+
+    groups = strip_groups(chunks)
+    if groups and not failures:
+        # 붙여넣기로는 나란히 배치를 못 만들어 에디터 문서 데이터에서 다시 묶는다
+        n_img = sum(1 for ch in chunks if ch["type"] == "image")
+        r = se_doc.fix_media(chrome_js, expect_images=n_img, groups=groups)
+        if r.get("ok"):
+            print(f"      사진 그리드 {len(groups)}개 중 {r['strips']}개를 나란히 묶음"
+                  + (f", 못 묶음 {r['skipped']}" if r["skipped"] else ""))
+        else:
+            print(f"      [WARN] 사진 그리드 묶기 건너뜀(낱장으로 둠): {r.get('err')}")
 
     print("[5/6] injecting code blocks...")
     try:
@@ -520,7 +587,6 @@ def main():
     except OSError:
         has_code = False
     if has_code:
-        import os
         # inject_code_blocks.py lives in the repo-shared _lib/ (also used by
         # the /blog and /notion-to-naver skills), two levels up from here.
         injector = os.path.join(

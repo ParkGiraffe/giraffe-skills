@@ -75,6 +75,22 @@ def stamp(im: Image.Image, text: str = TEXT, scale: float = 1.0,
     return Image.alpha_composite(im.convert("RGBA"), overlay).convert("RGB")
 
 
+def exif_bytes(im):
+    """원본 EXIF(촬영 시각 등)를 새 파일에 옮길 바이트. 회전은 픽셀에 반영했으므로 Orientation=1.
+
+    EXIF를 버리면 촬영 시각이 사라져 사진을 시간순으로 다시 줄 세울 수 없다
+    (2026-09-26 포켓몬 고풍상점: 워터마크본과 얼굴 가린 사진의 시각이 전부 날아갔다).
+    """
+    try:
+        e = im.getexif()
+        if not e:
+            return b""
+        e[0x0112] = 1
+        return e.tobytes()
+    except Exception:
+        return b""
+
+
 def add_watermark(path, text=TEXT, opacity=OPACITY):
     """파일을 제자리에서 처리. GIF·미지원 포맷은 그대로 둔다.
 
@@ -84,7 +100,8 @@ def add_watermark(path, text=TEXT, opacity=OPACITY):
         im = Image.open(path)
         if im.format == "GIF" or getattr(im, "is_animated", False):
             return False
-        stamp(im, text, opacity=opacity).save(path, quality=92)
+        ex = exif_bytes(im)
+        stamp(im, text, opacity=opacity).save(path, quality=92, exif=ex)
         return True
     except Exception as e:
         print(f"[watermark] 실패({os.path.basename(path)}): {e}")
@@ -97,13 +114,22 @@ def main():
     ap.add_argument("--text", default=TEXT)
     ap.add_argument("--scale", type=float, default=1.0,
                     help="확정 상수에 곱할 배율. 보통 건드리지 않는다.")
+    ap.add_argument("--recursive", action="store_true",
+                    help="하위 폴더까지 처리. 기본은 입력 폴더 바로 아래 사진만")
     a = ap.parse_args()
 
     src, dst = pathlib.Path(a.src), pathlib.Path(a.dst)
     if src.resolve() == dst.resolve():
         sys.exit("출력 폴더가 입력과 같습니다. 원본을 덮어쓰지 않도록 다른 폴더를 지정하세요.")
+    # 기본은 하위 폴더를 보지 않는다. 사진 폴더 안에 '얼굴가리기' 같은 작업 폴더가 있으면
+    # 그 안의 가리기 전 원본이 같은 이름으로 결과를 덮어쓸 수 있다(2026-09-26).
+    walk = src.rglob("*") if a.recursive else src.glob("*")
     files = [src] if src.is_file() else sorted(
-        p for p in src.rglob("*") if p.suffix.lower() in EXTS and not p.name.startswith("."))
+        p for p in walk if p.is_file() and p.suffix.lower() in EXTS and not p.name.startswith("."))
+    if not src.is_file() and not a.recursive:
+        subs = [d.name for d in src.iterdir() if d.is_dir() and not d.name.startswith(".")]
+        if subs:
+            print(f"하위 폴더는 건너뜀: {', '.join(subs)} (포함하려면 --recursive)")
     if not files:
         sys.exit("대상 파일 없음")
 
@@ -112,7 +138,8 @@ def main():
         rel = p.name if src.is_file() else p.relative_to(src)
         out = dst / rel
         out.parent.mkdir(parents=True, exist_ok=True)
-        stamp(Image.open(p), a.text, a.scale).save(out, quality=95, subsampling=0)
+        im = Image.open(p)
+        stamp(im, a.text, a.scale).save(out, quality=95, subsampling=0, exif=exif_bytes(im))
         n += 1
     print(f"워터마크 {n}장 -> {dst}")
 

@@ -131,7 +131,8 @@ def cmd_restore(a):
                    min(im.width, m["x"] + m["w"] + PAD),
                    min(im.height, m["y"] + m["h"] + PAD))
             im.paste(src.crop(box), box[:2])
-        im.save(ap, quality=95, subsampling=0)
+        ex = Image.open(ap).getexif()   # 가린 사진의 EXIF(촬영 시각)를 유지한다
+        im.save(ap, quality=95, subsampling=0, exif=ex.tobytes() if ex else b"")
         print(f"  {key}: {len(ms)}곳 되돌림")
     print(f"\n사진 {len(byfile)}장 / 가림 {len(nums)}곳 되돌림")
 

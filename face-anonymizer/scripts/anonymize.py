@@ -66,6 +66,26 @@ def parse_color(spec: str):
     sys.exit(f"색상 형식 오류: {spec} (gray/black/white 또는 'R,G,B')")
 
 
+def save_with_exif(bgr, src_path, out_path, quality=95):
+    """가린 사진을 저장하면서 원본 EXIF(촬영 시각 등)를 옮긴다. 회전은 이미 픽셀에 반영돼 Orientation=1.
+
+    cv2.imwrite는 EXIF를 전부 버린다. 그러면 촬영 시각이 사라져 카톡·스크린샷과 섞어
+    시간순으로 줄 세울 때 이 사진만 자리를 못 찾는다(2026-09-26). 수동으로 원을 더 그린
+    사진도 이 함수로 저장한다.
+    """
+    from PIL import Image
+    ex = b""
+    try:
+        e = Image.open(src_path).getexif()
+        if e:
+            e[0x0112] = 1
+            ex = e.tobytes()
+    except Exception:
+        pass
+    rgb = bgr[:, :, ::-1]
+    Image.fromarray(rgb).save(out_path, quality=quality, subsampling=0, exif=ex)
+
+
 def load_oriented(path, cv2, np, Image, ImageOps):
     """PIL로 EXIF 회전 반영 후 BGR ndarray 반환."""
     im = Image.open(path)
@@ -192,7 +212,7 @@ def main():
             cover_circle(bgr, faces, color, args.radius_k, cv2)
         stem = os.path.splitext(name)[0]
         out_path = os.path.join(out, stem + ".jpg")
-        cv2.imwrite(out_path, bgr, [cv2.IMWRITE_JPEG_QUALITY, args.quality])
+        save_with_exif(bgr, path, out_path, args.quality)
         print(f"[{i}/{len(files)}] {name}  얼굴 {len(faces)}개")
 
     print("=" * 40)

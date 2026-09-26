@@ -7,7 +7,7 @@
 `face-anonymizer`, `instagram-download`, `youtube-music-download`, `rebase-on-main` 정도가
 계정과 무관하게 동작합니다. 나머지는 포크해서 블로그 ID와 Notion DB ID를 바꿔야 합니다.
 
-## 수록 스킬 (26개)
+## 수록 스킬 (27개)
 
 ### 블로그 글쓰기
 
@@ -40,6 +40,7 @@
 |---|---|
 | [`naver-search-check`](./naver-search-check/) | 글이 네이버 모바일 블로그탭 검색에 실제로 잡히는지 확인해 서치 블락, 색인 지연, 삭제·비공개를 구분합니다. |
 | [`naver-photo-censor`](./naver-photo-censor/) | 살 노출 과다로 검색이 막힌 글의 사진에서 해당 부위만 소형 회색 박스로 가립니다. GIF는 전 프레임에 적용하고 원본을 백업합니다. |
+| [`photo-folder-to-naver`](./photo-folder-to-naver/) | 카톡 사진, 스크린샷, 직접 찍은 사진이 섞인 폴더를 찍은 시각순으로 번호를 붙이고 워터마크를 넣습니다. 영상은 movies 폴더로 옮기고, 방송이 없는 크롬 창에 새 글쓰기 탭을 열어 번호 순서대로 올립니다. |
 | [`naver-unpublished-photos`](./naver-unpublished-photos/) | 발행된 글의 이미지 파일명과 로컬 폴더를 대조해 미수록 사진만 분류합니다. 파일명이 안 맞으면 dHash로 폴백합니다. |
 | [`naver-to-tistory-backlink`](./naver-to-tistory-backlink/) | 네이버 글을 티스토리에 SEO 백링크용 정리본으로 발행합니다. 본문에 원문 링크 3종(m.blog, PC, PostView raw)을 박습니다. |
 
@@ -107,7 +108,7 @@
 
 ```
 giraffe-skills/
-├── <skill>/SKILL.md      스킬 정의 26개
+├── <skill>/SKILL.md      스킬 정의 27개
 ├── <skill>/scripts/      그 스킬 전용 스크립트
 ├── _lib/                 여러 스킬이 공유하는 모듈
 ├── docs/                 설계 문서 (plans, specs)

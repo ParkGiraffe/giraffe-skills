@@ -78,6 +78,9 @@ python3 tistory-to-naver/scripts/migrate_fresh_tab.py '<TISTORY_URL>' \
 복원분에 붙여넣어 중복·서식 전이, `--clear` → 캐럿에 남은 서식이 새 본문에 전이,
 탭 닫기 시도 → beforeunload alert가 매크로 전체를 블로킹.
 
+**새 탭은 방송(치지직 등)이 없는 크롬 창에 연다.** 창 고르기 정본은 `_lib/chrome_window.py`이고
+`migrate_fresh_tab.py`, `upload_draft.py`, `migrate.py`의 탭 생성이 모두 이것을 쓴다.
+
 `migrate.py`를 직접 부르면 '첫 번째' postwrite 탭을 조준하므로 기존 탭이 있으면
 사고가 난다. `migrate_fresh_tab.py`가 새 탭을 열고 '마지막' postwrite 탭 조준으로
 바꿔치기한 뒤 migrate.py의 main을 그대로 실행한다. 새 탭이 비어있지 않으면
@@ -122,6 +125,9 @@ URL을 그대로 찾으면 이관본이 나온다. 766편을 전수 크롤링할
 
 내부 6단계 (전부 자동):
 1. Tistory fetch + 내부 링크 치환 + 이미지 병렬 다운로드(6스레드) + 청크 분할
+   + **누락 감사**: 원본 문단(`p`·`li`·제목·`figcaption`)이 청크에 전부 들어갔는지
+   `missing_text`로 확인하고, 하나라도 빠지면 에디터를 건드리기 전에 exit 6으로 멈춘다.
+   빠져도 되는 글이면 `--allow-missing`. 사진 수만 세던 때는 글이 통째로 빠져도 DONE이 떴다
 2. postwrite 탭 확보(URL 재탐색, 없으면 열기) + 임시저장 다이얼로그 JS 취소
    + `hasFocus` 폴링으로 창 포커스 보장. 에디터가 비어있지 않으면 ABORT
    (`--clear` 줘야 Cmd+A+Backspace로 초기화 — 초안 보호)
@@ -337,6 +343,9 @@ HTML의 `window.T.entryInfo = {"categoryLabel":"..."}` 로 판정한다.
 | `<p>&nbsp;</p>` 빈 줄 | `<p><br></p>` barrier |
 | `<img>` (Tistory CDN URL) | 로컬로 다운로드 후 별도 청크로 분리 → 클립보드에 파일 URL로 올려 페이스트 (네이버가 자동 업로드) |
 | `<pre>` 코드블록 | Pass 1: `[[CODE-n]]` placeholder 본문 단락 + `/tmp/naver_code_blocks.json` 사이드카 → Pass 2(`_lib/inject_code_blocks.py`): native `se-code` 컴포넌트로 치환 |
+| 더보기(`data-ke-type="moreLess"`) 등 여러 블록을 감싼 `<div>` | 안으로 들어가 글·사진·그리드를 원래 순서대로 처리(`_is_container`). 접기 버튼 글자 "더보기"는 버린다. 네이버에 접기가 없어 펼친 채 옮긴다. 예전에는 사진만 꺼내고 글을 전부 버렸다 |
+| `<ul>`/`<ol>` 글머리 목록 | 항목마다 `• `(번호 목록은 `1. `, 하위 목록은 들여쓴 `◦ `)를 붙인 본문 문단 (`_emit_list`) |
+| 사진 `<figcaption>` | 사진 바로 아래 본문 문단 |
 | `<figure data-ke-type="video">` 유튜브 임베드 | `영상 : <제목> <a href="https://www.youtube.com/watch?v=...">URL</a>` 본문 단락 (`_video_link_html`) |
 
 핵심 트릭: 본문 청크엔 항상 `font-weight:normal; background-color:transparent;` 를 명시 — 네이버 sanitizer가 이전 헤딩 스타일을 본문 단락에 번지게 하는 버그를 막음.
@@ -344,6 +353,12 @@ HTML의 `window.T.entryInfo = {"categoryLabel":"..."}` 로 판정한다.
 **왜 native 소제목 컴포넌트를 안 쓰는가**: 네이버 SmartEditor의 paste 핸들러는 chromium의 `source-rfh-token` + 자체 `data-input-buffer` 토큰 둘 다 매칭돼야만 메모리에서 원본 컴포넌트를 복원합니다. 외부 매크로(터미널 Python AppKit)에서 만든 클립보드엔 이 토큰이 없으므로 어떤 SmartEditor 마크업을 박아도 **모두 본문 컴포넌트로 normalize됨**. 실측으로 정답 마크업을 한 자도 안 바꾸고 페이스트해도 본문 15px 볼드로 떨어짐을 확인. native 컴포넌트 inject는 in-process 자동화로만 가능 — 소제목은 시각 표시(노란 배경)로 충분해서 매크로 paste 를 유지.
 
 **단, 코드블록은 in-process 주입이 됨** (2026-06-11 실측): osascript `execute javascript` (Chrome "Apple Events의 자바스크립트 허용" 필요)로 페이지 안에서 툴바 `button[data-name=code]` 를 클릭하면 에디터 자신의 핸들러가 정상 컴포넌트를 만들고, `.se-code-source-editor` textarea 에 native value setter + `input` 이벤트로 코드를 넣으면 모델이 수용함. 단 SE 는 합성(synthetic) paste/insertText 를 `isTrusted` 로 거부하므로, 캐럿 위치 잡기(트리플클릭)와 placeholder 삭제(Backspace)는 Quartz CGEvent 실제 입력으로 쏴야 함. 이 조합이 `_lib/inject_code_blocks.py` (Pass 2). 같은 원리로 소제목도 native 화 가능하지만 현재는 코드블록만 적용.
+
+- 기본 경로는 붙여넣기가 아니라 에디터 문서 데이터 직접 쓰기다(`_lib/se_doc.py`, 2026-09-23). 키보드·클립보드를
+  쓰지 않아 크롬에서 방송을 보거나 다른 창을 써도 된다. 코드블록(`[[CODE-n]]`)이 있거나 `--paste`를 주면
+  예전 붙여넣기 경로로 간다.
+- 티스토리 사진 그리드(`imagegridblock`)는 `data-widthpercent` 합이 100이 되는 곳마다 줄을 나눠, 2~3장 줄을
+  네이버의 나란히 배치(imageStrip)로 묶는다(5장 그리드 = 2장 줄 + 3장 줄). 사진 수가 어긋나면 낱장으로 둔다.
 
 ## 자동 footer 첨부
 

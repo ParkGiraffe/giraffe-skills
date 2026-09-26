@@ -71,7 +71,8 @@ md_to_smarteditor.py는 이모지가 있으면 exit 3 — 대본을 수정하고
 python3 blog/scripts/upload_to_editor.py .claude/blog-corpus/drafts/<드래프트> [--clear]
 ```
 
-탭 확보, 전면 앱·포커스 검증, 제목 입력, 본문 붙여넣기(`paste_to_naver.py` 호출),
+탭 확보, 제목·본문 입력(인라인 서식이 없으면 에디터 문서 데이터로 직접 쓰고, 코드·링크·밑줄 같은
+서식이 있으면 `paste_to_naver.py` 붙여넣기로 자동 전환), 한 줄에 사진 두 장은 두 장 묶음,
 `여행 날짜` 줄 볼드, 스타일 패스(구분선 line3+가운데, 사진 가운데), 결과 검증까지
 한 프로세스로 돈다. 각 단계에서 실패하면 즉시 멈추므로 무인으로 계속 쏘는 사고가 안 난다.
 
