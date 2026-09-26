@@ -33,6 +33,9 @@ sys.path.insert(0, str(REPO / "_lib"))
 import se_doc                        # 붙여넣기 뒤 원본의 사진 묶음(imageStrip) 복원
 import Quartz
 
+sys.path.insert(0, str(REPO / "_lib"))
+import chrome_window  # noqa: E402
+
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 REFERER = "https://blog.naver.com/"
@@ -403,11 +406,9 @@ def verify_chunks_vs_source(html, chunks):
 
 # ---------------------------------------------------------------- 에디터 조작
 def open_fresh_editor(blog_id):
-    osa(f'''tell application "Google Chrome"
-      activate
-      make new tab at end of tabs of window 1 with properties {{URL:"https://blog.naver.com/{blog_id}/postwrite"}}
-      set active tab index of window 1 to (count of tabs of window 1)
-    end tell''')
+    # 방송(치지직 등)이 틀어진 창은 피해 새 탭을 열고 그 창을 맨 앞으로 올린다.
+    # 이 스크립트의 chrome_js와 좌표 클릭은 window 1의 활성 탭을 보므로 앞으로 올려야 맞는다.
+    chrome_window.open_tab_front(f"https://blog.naver.com/{blog_id}/postwrite")
     time.sleep(6)
     chrome_js('(function(){var b=Array.from(document.querySelectorAll("button")).find(function(x){return x.textContent.trim()==="취소";});if(b)b.click();return "ok";})()')
     time.sleep(1)

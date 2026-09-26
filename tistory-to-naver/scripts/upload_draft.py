@@ -21,6 +21,8 @@ import migrate as M          # chrome plumbing, CGEvent input, paste_chunks, sty
 import migrate_from_url as m  # clipboard helpers (used by M.paste_chunks)
 sys.path.insert(0, os.path.join(REPO, "blog", "scripts"))
 import paste_to_naver as P    # parse_to_chunks with ## / ### heading styles
+sys.path.insert(0, os.path.join(REPO, "_lib"))
+import chrome_window          # 방송 없는 창 고르기
 
 BLOG_ID = "op5321"
 
@@ -59,12 +61,8 @@ def main():
     # 임시저장 복원 다이얼로그는 '떠야 닫을 수 있으므로' 로딩 후 넉넉히 기다렸다가
     # 취소를 누른다. .se-popup 안만 보면 아직 안 뜬 다이얼로그를 놓친다.
     print("[tab] opening a fresh postwrite tab (never close, never wipe)...", flush=True)
-    M.osa('tell application "Google Chrome"',
-          "activate",
-          "make new tab at end of tabs of window 1 with properties "
-          f'{{URL:"https://blog.naver.com/{BLOG_ID}/postwrite"}}',
-          "set active tab index of window 1 to (count of tabs of window 1)",
-          "end tell")
+    # 방송(치지직 등)이 틀어진 창은 피하고, 고른 창을 맨 앞으로 올린다(_lib/chrome_window).
+    chrome_window.open_tab_front(f"https://blog.naver.com/{BLOG_ID}/postwrite")
     time.sleep(6)
     M.chrome_js('(function(){var b=Array.from(document.querySelectorAll("button"))'
                 '.find(function(x){return x.textContent.trim()==="취소"&&x.offsetParent;});'

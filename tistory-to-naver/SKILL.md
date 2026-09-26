@@ -78,6 +78,9 @@ python3 tistory-to-naver/scripts/migrate_fresh_tab.py '<TISTORY_URL>' \
 복원분에 붙여넣어 중복·서식 전이, `--clear` → 캐럿에 남은 서식이 새 본문에 전이,
 탭 닫기 시도 → beforeunload alert가 매크로 전체를 블로킹.
 
+**새 탭은 방송(치지직 등)이 없는 크롬 창에 연다.** 창 고르기 정본은 `_lib/chrome_window.py`이고
+`migrate_fresh_tab.py`, `upload_draft.py`, `migrate.py`의 탭 생성이 모두 이것을 쓴다.
+
 `migrate.py`를 직접 부르면 '첫 번째' postwrite 탭을 조준하므로 기존 탭이 있으면
 사고가 난다. `migrate_fresh_tab.py`가 새 탭을 열고 '마지막' postwrite 탭 조준으로
 바꿔치기한 뒤 migrate.py의 main을 그대로 실행한다. 새 탭이 비어있지 않으면

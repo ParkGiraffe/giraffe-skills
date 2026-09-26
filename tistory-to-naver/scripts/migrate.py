@@ -113,8 +113,10 @@ def raise_postwrite_window():
 def ensure_postwrite_tab(blog_id):
     if chrome_js("'ping'") == "NO_TAB":
         url = POSTWRITE_URL.format(blog_id=blog_id)
-        osa('tell application "Google Chrome" to tell window 1 to make new tab '
-            f'at end of tabs with properties {{URL:"{url}"}}')
+        # 방송(치지직 등)이 틀어진 창은 피한다 (_lib/chrome_window)
+        sys.path.insert(0, os.path.join(REPO_ROOT, "_lib"))
+        import chrome_window
+        chrome_window.open_tab_front(url)
         for _ in range(20):
             time.sleep(1)
             if chrome_js("document.querySelector('.se-canvas') ? 'ready' : 'loading'") == "ready":

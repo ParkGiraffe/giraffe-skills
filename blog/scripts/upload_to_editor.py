@@ -37,6 +37,7 @@ sys.path.insert(0, f"{REPO}/_lib")
 
 import migrate as M
 import se_doc
+import chrome_window
 
 KEY_B = 11
 
@@ -132,30 +133,18 @@ def open_fresh_tab():
 
     그 탭에는 사용자가 직접 쓰던 원고가 들어 있을 수 있고, 한 번 비우면 되돌릴 방법이 없다.
     임시저장도 슬롯이 몇 개뿐이라 안전망이 못 된다. 새로 여는 편이 언제나 싸다.
+
+    창은 _lib/chrome_window가 고른다. 치지직 등 방송이 틀어진 창은 피한다. 예전에는
+    window 1에 고정으로 열어 방송 창의 활성 탭을 빼앗았다(2026-09-26).
     """
-    url = M.POSTWRITE_URL.format(blog_id=M.BLOG_ID)
-    M.osa('tell application "Google Chrome" to activate')
-    time.sleep(0.5)
-    M.osa('tell application "Google Chrome" to tell window 1 to '
-          f'make new tab at end of tabs with properties {{URL:"{url}"}}')
-    time.sleep(1.0)
-    tab_id = M.osa('tell application "Google Chrome" to get id of last tab of window 1')
-    M.osa('tell application "Google Chrome" to set active tab index of window 1 to '
-          '(count of tabs of window 1)')
+    try:
+        tab_id, js = chrome_window.open_postwrite_tab(M.BLOG_ID)
+    except RuntimeError as e:
+        print(f"[ABORT] {e}"); sys.exit(2)
     # 이후 M의 모든 JS 호출(style_pass 등)이 이 탭만 보게 못박는다
-    M.chrome_js = make_chrome_js(tab_id)
+    M.chrome_js = js
     global CURRENT_TAB_ID
     CURRENT_TAB_ID = tab_id
-    for _ in range(90):   # 에디터 로딩이 30초를 넘기는 경우가 있어 90초까지 기다린다 (2026-09-03)
-        time.sleep(1.0)
-        try:
-            if M.chrome_js("document.querySelector('.se-canvas') ? 'ready' : 'loading'") == "ready":
-                break
-        except Exception:
-            pass
-    else:
-        print("[ABORT] 글쓰기 탭이 안 뜸"); sys.exit(2)
-    print(f"      새 탭 id={tab_id}")
     time.sleep(0.5)
 
 
