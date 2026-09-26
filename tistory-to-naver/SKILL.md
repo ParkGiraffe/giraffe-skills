@@ -122,6 +122,9 @@ URL을 그대로 찾으면 이관본이 나온다. 766편을 전수 크롤링할
 
 내부 6단계 (전부 자동):
 1. Tistory fetch + 내부 링크 치환 + 이미지 병렬 다운로드(6스레드) + 청크 분할
+   + **누락 감사**: 원본 문단(`p`·`li`·제목·`figcaption`)이 청크에 전부 들어갔는지
+   `missing_text`로 확인하고, 하나라도 빠지면 에디터를 건드리기 전에 exit 6으로 멈춘다.
+   빠져도 되는 글이면 `--allow-missing`. 사진 수만 세던 때는 글이 통째로 빠져도 DONE이 떴다
 2. postwrite 탭 확보(URL 재탐색, 없으면 열기) + 임시저장 다이얼로그 JS 취소
    + `hasFocus` 폴링으로 창 포커스 보장. 에디터가 비어있지 않으면 ABORT
    (`--clear` 줘야 Cmd+A+Backspace로 초기화 — 초안 보호)
@@ -337,6 +340,9 @@ HTML의 `window.T.entryInfo = {"categoryLabel":"..."}` 로 판정한다.
 | `<p>&nbsp;</p>` 빈 줄 | `<p><br></p>` barrier |
 | `<img>` (Tistory CDN URL) | 로컬로 다운로드 후 별도 청크로 분리 → 클립보드에 파일 URL로 올려 페이스트 (네이버가 자동 업로드) |
 | `<pre>` 코드블록 | Pass 1: `[[CODE-n]]` placeholder 본문 단락 + `/tmp/naver_code_blocks.json` 사이드카 → Pass 2(`_lib/inject_code_blocks.py`): native `se-code` 컴포넌트로 치환 |
+| 더보기(`data-ke-type="moreLess"`) 등 여러 블록을 감싼 `<div>` | 안으로 들어가 글·사진·그리드를 원래 순서대로 처리(`_is_container`). 접기 버튼 글자 "더보기"는 버린다. 네이버에 접기가 없어 펼친 채 옮긴다. 예전에는 사진만 꺼내고 글을 전부 버렸다 |
+| `<ul>`/`<ol>` 글머리 목록 | 항목마다 `• `(번호 목록은 `1. `, 하위 목록은 들여쓴 `◦ `)를 붙인 본문 문단 (`_emit_list`) |
+| 사진 `<figcaption>` | 사진 바로 아래 본문 문단 |
 | `<figure data-ke-type="video">` 유튜브 임베드 | `영상 : <제목> <a href="https://www.youtube.com/watch?v=...">URL</a>` 본문 단락 (`_video_link_html`) |
 
 핵심 트릭: 본문 청크엔 항상 `font-weight:normal; background-color:transparent;` 를 명시 — 네이버 sanitizer가 이전 헤딩 스타일을 본문 단락에 번지게 하는 버그를 막음.

@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 import AppKit
 import hashlib
 import time
+import copy
 import re
 
 # Configuration
@@ -375,7 +376,11 @@ def _body_html_from_element(element):
     BODY_SPAN_STYLE (with font-weight:normal to block heading bleed); bold
     text uses BODY_BOLD_SPAN_STYLE which overrides weight. Whitespace inside
     each text node is collapsed to single spaces, but   is preserved."""
-    raw_segments = _inline_segments(element)
+    return _body_html_from_segments(_inline_segments(element))
+
+
+def _body_html_from_segments(raw_segments):
+    """(text, bold) 목록을 본문 문단 <p> 하나로 만든다. _body_html_from_element의 본체."""
     if not raw_segments:
         return ''
 
@@ -526,6 +531,49 @@ def _grid_rows(element):
     return out
 
 
+_BLOCK_TAGS = {'p', 'div', 'ul', 'ol', 'figure', 'pre', 'blockquote', 'table', 'hr',
+               'section', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}
+_IMAGE_FIGURE_CLASSES = {'imageblock', 'imagegridblock'}
+
+
+def _is_container(element):
+    """블록 여러 개를 감싼 래퍼인가. 사진·코드·영상이 글과 섞여 있을 때만 참이다.
+
+    사진 한 장짜리 <p>나 사진 figure는 여기서 거르고 기존 사진 분기가 처리한다.
+    """
+    if element.name not in ('div', 'section', 'article', 'blockquote'):
+        return False
+    if _IMAGE_FIGURE_CLASSES & set(element.get('class') or []):
+        return False
+    if not any(getattr(ch, 'name', None) in _BLOCK_TAGS for ch in element.children):
+        return False
+    return element.find(['img', 'pre', 'figure', 'ul', 'ol']) is not None
+
+
+def _squash(text):
+    return re.sub(r'[\s\x00-\x1f]+', '', text.replace('\u00a0', ' '))
+
+
+def missing_text(soup, chunks):
+    """원본 본문 문단 중 청크에 안 들어간 것의 글자를 돌려준다. 비어 있으면 누락 없음.
+
+    문단(<p>, <li>, 제목, figcaption) 단위로 공백을 지우고 청크 글 전체에 들어 있는지 본다.
+    코드는 [[CODE-n]] 자리표시로 바뀌므로 <pre> 안은 보지 않고, 접기 버튼 글자도 뺀다.
+    """
+    have = _squash(''.join(
+        BeautifulSoup(c['content'], 'html.parser').get_text()
+        for c in chunks if c['type'] == 'html'))
+    leaves = ('p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'figcaption')
+    out = []
+    for el in soup.find_all(leaves):
+        if el.find(leaves) or el.find_parent('pre') or el.find_parent(class_='btn-toggle-moreless'):
+            continue
+        t = el.get_text(' ', strip=True)
+        if _squash(t) and _squash(t) not in have:
+            out.append(t)
+    return out
+
+
 def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=None,
                              core_tags=None):
     """Split the parsed Tistory content into ordered chunks for the paste loop.
@@ -546,97 +594,138 @@ def split_content_into_chunks(soup, source_url=None, published_iso=None, tags=No
     current_html = ""
     code_blocks = []
 
-    for element in list(soup.children):
-        if element.name is None:
-            text = str(element).strip()
-            if text:
-                current_html += _body_html_from_text(text)
-            continue
+    def _emit_list(lst, depth=0):
+        nonlocal current_html
+        indent = '\u00a0\u00a0\u00a0' * depth
+        for i, li in enumerate(lst.find_all('li', recursive=False)):
+            marker = f'{i + 1}. ' if lst.name == 'ol' else ('• ' if depth == 0 else '◦ ')
+            # 하위 목록은 따로 들여 쓰므로 항목 글에서는 뺀다. 원본을 건드리면 뒤의
+            # missing_text 감사가 그 항목을 못 보므로 사본에서 뺀다.
+            nested = li.find_all(['ul', 'ol'], recursive=False)
+            own = copy.copy(li)
+            for n in own.find_all(['ul', 'ol'], recursive=False):
+                n.decompose()
+            para = _body_html_from_segments([(indent + marker, False)] + _inline_segments(own))
+            if para:
+                current_html += para
+            for n in nested:
+                _emit_list(n, depth + 1)
 
-        # Section divider \u2014 preserve as Naver paste-time hr.
-        # native \ucef4\ud3ec\ub10c\ud2b8(se-horizontalLine se-l-line3 \ub4f1) \ub9c8\ud06c\uc5c5 \uc2dc\ub3c4\ub294
-        # sanitizer\uac00 line type class\ub97c \ubaa8\ub450 default \ub85c \ub5a8\uc5b4\ub728\ub824 \uc2e4\ud328.
-        # \uc815\ud655\ud55c paste payload \ub97c \uc54c\uc544\ub0bc \ubc29\ubc95\uc774 \uc5c6\uc5b4 \ub2e8\uc21c <hr> \ub85c \uc720\uc9c0.
-        if element.name == 'hr':
-            current_html += '<hr>'
-            continue
+    def walk(parent):
+        nonlocal current_html
+        for element in list(parent.children):
+            if element.name is None:
+                text = str(element).strip()
+                if text:
+                    current_html += _body_html_from_text(text)
+                continue
 
-        # Headings \u2014 Tistory wraps section titles in <h1>..<h4>, sometimes
-        # with an inner <span style="background-color:#f6e199;">. We always
-        # convert to the blog skill's canonical highlighted heading.
-        if element.name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
-            text = element.get_text(separator=' ', strip=True)
-            if text:
-                # Main title (h1) or any heading the author highlighted yellow
-                # → big yellow heading. Plain-bold h3/h4 (no highlight) → smaller
-                # sub-heading with no background, preserving Tistory's hierarchy.
-                if element.name == 'h1' or _heading_has_highlight(element):
-                    current_html += _heading_html(text)
-                else:
-                    current_html += _subheading_html(text)
-            continue
+            # Section divider \u2014 preserve as Naver paste-time hr.
+            # native \ucef4\ud3ec\ub10c\ud2b8(se-horizontalLine se-l-line3 \ub4f1) \ub9c8\ud06c\uc5c5 \uc2dc\ub3c4\ub294
+            # sanitizer\uac00 line type class\ub97c \ubaa8\ub450 default \ub85c \ub5a8\uc5b4\ub728\ub824 \uc2e4\ud328.
+            # \uc815\ud655\ud55c paste payload \ub97c \uc54c\uc544\ub0bc \ubc29\ubc95\uc774 \uc5c6\uc5b4 \ub2e8\uc21c <hr> \ub85c \uc720\uc9c0.
+            if element.name == 'hr':
+                current_html += '<hr>'
+                continue
 
-        # Code blocks \u2014 Tistory <pre> \u2192 placeholder paragraph [[CODE-n]].
-        # paste sanitizer \ub54c\ubb38\uc5d0 \ucf54\ub4dc \ucef4\ud3ec\ub10c\ud2b8\ub3c4 paste \ub85c\ub294 \uc8fc\uc785 \ubd88\uac00 \u2014
-        # \uc6d0\ubcf8 \ucf54\ub4dc\ub294 CODE_BLOCKS_JSON \uc73c\ub85c \ub118\uae30\uace0, paste \uc885\ub8cc \ud6c4
-        # inject_code_blocks.py (pass 2) \uac00 placeholder \uc790\ub9ac\uc5d0 native
-        # SmartEditor \ucf54\ub4dc \ucef4\ud3ec\ub10c\ud2b8\ub97c \uc0bd\uc785\ud55c\ub2e4.
-        pres = [element] if element.name == 'pre' else element.find_all('pre')
-        if pres:
-            for pre in pres:
-                code_blocks.append({
-                    'index': len(code_blocks) + 1,
-                    'language': ' '.join(pre.get('class') or []) or None,
-                    'code': pre.get_text(),
-                })
-                current_html += _body_html_from_text(f'[[CODE-{len(code_blocks)}]]')
-            continue
+            # Headings \u2014 Tistory wraps section titles in <h1>..<h4>, sometimes
+            # with an inner <span style="background-color:#f6e199;">. We always
+            # convert to the blog skill's canonical highlighted heading.
+            if element.name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+                text = element.get_text(separator=' ', strip=True)
+                if text:
+                    # Main title (h1) or any heading the author highlighted yellow
+                    # → big yellow heading. Plain-bold h3/h4 (no highlight) → smaller
+                    # sub-heading with no background, preserving Tistory's hierarchy.
+                    if element.name == 'h1' or _heading_has_highlight(element):
+                        current_html += _heading_html(text)
+                    else:
+                        current_html += _subheading_html(text)
+                continue
 
-        # 동영상: Tistory <figure data-ke-type="video">. iframe 은 fetch 단계에서
-        # 제거되고 wrapper 만 남으므로, 원본 유튜브 주소를 본문 링크로 바꾼다.
-        videos = ([element] if element.get('data-ke-type') == 'video'
-                  else element.select('figure[data-ke-type="video"]'))
-        if videos:
-            for fig in videos:
-                video_url = fig.get('data-video-url')
-                if not video_url:
-                    continue
-                current_html += _video_link_html(
-                    video_url, (fig.get('data-video-title') or '').strip() or None)
-            continue
+            # 접기(더보기) 버튼 글자. 네이버에는 접기가 없어 내용을 펼친 채 옮긴다.
+            if 'btn-toggle-moreless' in (element.get('class') or []):
+                continue
 
-        # Images \u2014 split out as separate paste chunks so Naver uploads each
-        imgs = element.find_all('img')
-        if imgs:
-            strip_of = _grid_rows(element)
-            for img in imgs:
-                strip_id = strip_of.get(id(img))
-                if current_html.strip():
-                    chunks.append({'type': 'html', 'content': current_html})
-                    current_html = ""
-                src = img.get('data-url') or img.get('data-src') or img.get('src')
-                if not src:
-                    continue
-                if src.startswith('//'):
-                    src = 'https:' + src
-                local_path = download_image(src)
-                if local_path:
-                    chunk = {'type': 'image', 'path': local_path}
-                    if strip_id is not None:
-                        chunk['strip'] = strip_id
-                    chunks.append(chunk)
-            continue
+            # 글머리 목록. 항목마다 "• "(번호 목록은 "1. ")를 붙인 문단으로 옮긴다.
+            if element.name in ('ul', 'ol'):
+                _emit_list(element)
+                continue
 
-        # Generic block \u2014 preserve inline <b>/<strong> + <br>, emit body paragraph
-        html_para = _body_html_from_element(element)
-        if html_para:
-            current_html += html_para
-            continue
-        # Tistory uses <p>&nbsp;</p> for visual blank lines \u2014 keep as barrier
-        if element.name in ('p', 'div', 'br'):
-            original = element.get_text()
-            if '\u00a0' in original or '&nbsp;' in str(element):
-                current_html += BARRIER_HTML
+            # 더보기 블록처럼 여러 블록을 감싼 컨테이너. 통째로 사진 분기에 넘기면 사진만
+            # 꺼내고 글을 버린다(2026-09-25 티스토리 632 공격 패턴 절 전체 누락). 안으로
+            # 들어가 글·사진·그리드를 원래 순서대로 처리한다.
+            if _is_container(element):
+                walk(element)
+                continue
+
+            # Code blocks \u2014 Tistory <pre> \u2192 placeholder paragraph [[CODE-n]].
+            # paste sanitizer \ub54c\ubb38\uc5d0 \ucf54\ub4dc \ucef4\ud3ec\ub10c\ud2b8\ub3c4 paste \ub85c\ub294 \uc8fc\uc785 \ubd88\uac00 \u2014
+            # \uc6d0\ubcf8 \ucf54\ub4dc\ub294 CODE_BLOCKS_JSON \uc73c\ub85c \ub118\uae30\uace0, paste \uc885\ub8cc \ud6c4
+            # inject_code_blocks.py (pass 2) \uac00 placeholder \uc790\ub9ac\uc5d0 native
+            # SmartEditor \ucf54\ub4dc \ucef4\ud3ec\ub10c\ud2b8\ub97c \uc0bd\uc785\ud55c\ub2e4.
+            pres = [element] if element.name == 'pre' else element.find_all('pre')
+            if pres:
+                for pre in pres:
+                    code_blocks.append({
+                        'index': len(code_blocks) + 1,
+                        'language': ' '.join(pre.get('class') or []) or None,
+                        'code': pre.get_text(),
+                    })
+                    current_html += _body_html_from_text(f'[[CODE-{len(code_blocks)}]]')
+                continue
+
+            # 동영상: Tistory <figure data-ke-type="video">. iframe 은 fetch 단계에서
+            # 제거되고 wrapper 만 남으므로, 원본 유튜브 주소를 본문 링크로 바꾼다.
+            videos = ([element] if element.get('data-ke-type') == 'video'
+                      else element.select('figure[data-ke-type="video"]'))
+            if videos:
+                for fig in videos:
+                    video_url = fig.get('data-video-url')
+                    if not video_url:
+                        continue
+                    current_html += _video_link_html(
+                        video_url, (fig.get('data-video-title') or '').strip() or None)
+                continue
+
+            # Images \u2014 split out as separate paste chunks so Naver uploads each
+            imgs = element.find_all('img')
+            if imgs:
+                strip_of = _grid_rows(element)
+                for img in imgs:
+                    strip_id = strip_of.get(id(img))
+                    if current_html.strip():
+                        chunks.append({'type': 'html', 'content': current_html})
+                        current_html = ""
+                    src = img.get('data-url') or img.get('data-src') or img.get('src')
+                    if not src:
+                        continue
+                    if src.startswith('//'):
+                        src = 'https:' + src
+                    local_path = download_image(src)
+                    if local_path:
+                        chunk = {'type': 'image', 'path': local_path}
+                        if strip_id is not None:
+                            chunk['strip'] = strip_id
+                        chunks.append(chunk)
+                for cap in element.find_all('figcaption'):
+                    cap_html = _body_html_from_element(cap)
+                    if cap_html:
+                        current_html += cap_html
+                continue
+
+            # Generic block \u2014 preserve inline <b>/<strong> + <br>, emit body paragraph
+            html_para = _body_html_from_element(element)
+            if html_para:
+                current_html += html_para
+                continue
+            # Tistory uses <p>&nbsp;</p> for visual blank lines \u2014 keep as barrier
+            if element.name in ('p', 'div', 'br'):
+                original = element.get_text()
+                if '\u00a0' in original or '&nbsp;' in str(element):
+                    current_html += BARRIER_HTML
+
+    walk(soup)
 
     if current_html.strip():
         chunks.append({'type': 'html', 'content': current_html})

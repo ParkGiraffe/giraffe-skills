@@ -29,6 +29,8 @@ Usage:
               기본은 바꾼다 (naver_backlinks.py). 이관본이 없는 링크는 원본 유지.
   --title     override the post title (default: Tistory og:title).
               e.g. --title "[JS 강의] 1. 자바스크립트에 대한 개요"
+  --allow-missing
+              원본 문단이 변환 결과에 빠져도 멈추지 않는다. 기본은 exit 6으로 멈춘다.
 """
 
 import base64
@@ -479,6 +481,17 @@ def main():
         core_tags=core_tags)
     n_img = sum(1 for c in chunks if c["type"] == "image")
     print(f"      {len(chunks)} chunks ({n_img} images) | title: {title}")
+
+    # 원본 문단이 청크에 다 들어갔는지 에디터를 건드리기 전에 확인한다. 사진 수만 세면
+    # 글이 통째로 빠져도 DONE이 뜬다(2026-09-25 티스토리 632: 더보기 블록 글 7문단 누락).
+    missing = m.missing_text(post["content"], chunks)
+    if missing:
+        print(f"[ABORT] 원본 문단 {len(missing)}개가 변환 결과에 없음:")
+        for t in missing[:10]:
+            print(f"        - {t[:80]}")
+        if "--allow-missing" not in flags:
+            print("        변환기를 고치거나, 빠져도 되는 글이면 --allow-missing 으로 다시 실행")
+            sys.exit(6)
 
     # 기본은 에디터 문서 데이터로 제목·본문·사진을 한 번에 쓴다(_lib/se_doc). 키보드·클립보드를
     # 안 쓰므로 크롬에서 다른 탭(방송 등)을 보고 있어도 된다 (2026-09-23 도입).
