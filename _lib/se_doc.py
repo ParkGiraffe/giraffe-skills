@@ -395,11 +395,20 @@ return JSON.stringify({ok:true, comps: out.length, images: up.length});
 _CHUNK = 180_000
 
 
+def editor_file_name(name):
+    """에디터가 저장하는 사진 파일명. 공백을 '_'로 바꾼다(괄호 등은 그대로, 2026-09-26 실측).
+
+    업로드 완료를 파일명으로 확인하는 곳은 전부 이 이름으로 비교해야 한다. 원래 이름으로
+    비교하면 'Pokmon GO.jpg' 같은 사진에서 완료를 영영 못 보고 멈춘다(2026-09-26 사고).
+    """
+    return name.replace(" ", "_")
+
+
 def write_document(chrome_js, title, ops, log=print):
     """글 전체를 에디터에 쓴다. 사진 업로드 -> 문서 JSON 교체 순서다. 성공하면 사진 수를 돌려준다."""
     comps = skeleton_from_ops(ops)
     paths = [op[1] for op in ops if op[0] == "img"]
-    names = [p.rsplit("/", 1)[-1] for p in paths]
+    names = [editor_file_name(p.rsplit("/", 1)[-1]) for p in paths]
     if len(set(names)) != len(names):
         raise RuntimeError("사진 파일명이 겹침. 파일명으로 업로드 결과를 짝지으므로 이름이 모두 달라야 한다")
 
@@ -592,3 +601,97 @@ def place_videos_at_slots(chrome_js, slots):
     if not out or out.startswith("ERR"):
         return {"ok": False, "err": out or "빈 응답"}
     return json.loads(out)
+
+
+# ---------------------------------------------------------------- 사진만 이어 붙이기
+# 사진 폴더를 통째로 본문에 올릴 때 쓴다(photo-folder-to-naver). 사진은 127.0.0.1 임시 서버로
+# 내주고 페이지가 fetch해 에디터 API(insertImagesByFile)로 넣는다. 키보드·클립보드를 안 쓴다.
+# 완료 판정은 파일명이 아니라 '사진 수 증가 + 전부 업로드됨'으로 한다.
+_IMG_STATE_JS = r"""
+var ed = SmartEditor._editors[Object.keys(SmartEditor._editors)[0]];
+var im = ed.getDocumentData().document.components.filter(function(c){ return c['@ctype'] === 'image'; });
+return JSON.stringify({n: im.length, done: im.filter(function(c){ return c.path && c.src; }).length,
+                       names: im.map(function(c){ return String(c.fileName); })});
+"""
+
+_INSERT_JS = r"""
+var P = __PARAMS__;   // {urls, names, types}
+var ed = SmartEditor._editors[Object.keys(SmartEditor._editors)[0]];
+window.__seUp = 'fetching';
+Promise.all(P.urls.map(function(u, i){
+  return fetch(u).then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + P.names[i]); return r.blob(); })
+    .then(function(b){ return new File([b], P.names[i], {type: P.types[i]}); });
+})).then(function(fs){
+  ed.execCommand('insertImagesByFile', {data: fs.map(function(f){ return {file: f, fileName: f.name}; })});
+  window.__seUp = 'ok ' + fs.length;
+}).catch(function(e){ window.__seUp = 'ERR ' + e; });
+return 'started';
+"""
+
+_SORT_JS = r"""
+var ed = SmartEditor._editors[Object.keys(SmartEditor._editors)[0]];
+var d = ed.getDocumentData(), cs = d.document.components;
+var order = __ORDER__;   // 에디터 파일명 순서
+var im = cs.filter(function(c){ return c['@ctype'] === 'image'; });
+var rank = function(c){ var i = order.indexOf(String(c.fileName)); return i < 0 ? 1e9 : i; };
+im.sort(function(a, b){ return rank(a) - rank(b); });
+var rest = cs.filter(function(c){ return im.indexOf(c) < 0; });
+var tail = rest.length > 1 && rest[rest.length - 1]['@ctype'] === 'text' ? rest.pop() : null;
+d.document.components = rest.concat(im).concat(tail ? [tail] : []);
+ed.setDocumentData(d);
+return JSON.stringify(ed.getDocumentData().document.components
+  .filter(function(c){ return c['@ctype'] === 'image'; }).map(function(c){ return String(c.fileName); }));
+"""
+
+
+def _ctype(path):
+    p = path.lower()
+    return "image/gif" if p.endswith(".gif") else "image/png" if p.endswith(".png") else (
+        "image/webp" if p.endswith(".webp") else "image/jpeg")
+
+
+def append_images(chrome_js, paths, batch=10, log=print, batch_timeout=180):
+    """paths(한 폴더 안)의 사진을 주어진 순서대로 본문에 올리고 그 순서로 정렬한다.
+
+    에디터 사진 파일명 목록(최종 순서)을 돌려준다. 순서가 어긋나거나 업로드가 멈추면 예외.
+    """
+    import os
+    if not paths:
+        return []
+    root = os.path.dirname(paths[0])
+    if any(os.path.dirname(p) != root for p in paths):
+        raise ValueError("사진은 한 폴더 안에 있어야 한다")
+    enames = [editor_file_name(os.path.basename(p)) for p in paths]
+    if len(set(enames)) != len(enames):
+        raise ValueError("에디터 파일명이 겹침(공백/밑줄만 다른 파일)")
+    srv, port = serve_dir(root)
+    try:
+        for i in range(0, len(paths), batch):
+            part = paths[i:i + batch]
+            before = json.loads(page_eval(chrome_js, _IMG_STATE_JS))["n"]
+            params = {"urls": [f"http://127.0.0.1:{port}/" + _up.quote(os.path.basename(p)) for p in part],
+                      "names": enames[i:i + batch], "types": [_ctype(p) for p in part]}
+            r = page_eval(chrome_js, _INSERT_JS.replace("__PARAMS__", json.dumps(params, ensure_ascii=False)))
+            if r != "started":
+                raise RuntimeError(f"업로드 시작 실패: {r}")
+            t0 = _time.time()
+            while True:
+                _time.sleep(1.5)
+                flag = page_eval(chrome_js, "return String(window.__seUp)")
+                if flag.startswith("ERR"):
+                    raise RuntimeError(f"{params['names'][0]}부터 업로드 실패: {flag}")
+                s = json.loads(page_eval(chrome_js, _IMG_STATE_JS))
+                if s["n"] == before + len(part) and s["done"] == s["n"]:
+                    break
+                if _time.time() - t0 > batch_timeout:
+                    raise RuntimeError(f"{params['names'][0]}부터 {batch_timeout}초 안에 안 끝남: "
+                                       f"사진 {s['n']}(기대 {before + len(part)}), 완료 {s['done']}, {flag}")
+            log(f"      사진 {i + len(part)}/{len(paths)}")
+    finally:
+        srv.shutdown()
+    final = json.loads(page_eval(chrome_js, _SORT_JS.replace("__ORDER__", json.dumps(enames, ensure_ascii=False)),
+                                 timeout=60))
+    ours = [n for n in final if n in set(enames)]
+    if ours != enames:
+        raise RuntimeError(f"정렬 후 순서가 다름: 기대 {len(enames)}장, 실제 {len(ours)}장")
+    return final

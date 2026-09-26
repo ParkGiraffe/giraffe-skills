@@ -56,3 +56,10 @@ def test_skeleton_groups_text_and_marks_images():
     assert [n["value"] for n in nodes] == ["본문 ", "굵게", " 끝"]
     assert [n["style"]["bold"] for n in nodes] == [False, True, False]
     assert comps[3] == {"__img": 0} and comps[5] == {"__img": 1}
+
+
+def test_editor_file_name_replaces_only_spaces():
+    # 에디터는 공백만 '_'로 바꾸고 괄호는 둔다 (2026-09-26 실측)
+    assert se_doc.editor_file_name("005_Screenshot_20260921_113111_Pokmon GO.jpg") == \
+        "005_Screenshot_20260921_113111_Pokmon_GO.jpg"
+    assert se_doc.editor_file_name("057_20260921_121743(0).jpg") == "057_20260921_121743(0).jpg"
