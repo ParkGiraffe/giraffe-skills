@@ -186,7 +186,9 @@ python3 blog/scripts/upload_to_editor.py .claude/blog-corpus/drafts/<드래프�
   선택해 지워 빈 문단에 캐럿을 남기고 업로더를 부르는 방식 — 동영상은 캐럿 위치에 들어간다).
   한 개만 따로 넣을 때는 `_lib/upload_video.py <파일> [제목]`.
   제목은 meta.json `videos[].title`에 적으면 그걸 쓰고, 없으면 파일명에서 슬롯 접두어를 뗀다.
-- **사진 워터마크**는 `_lib/watermark.py <입력폴더> <출력폴더>` (리포 정본).
+- **사진 워터마크**는 `_lib/watermark.py <입력폴더> <출력폴더>` (리포 정본). 기본은 입력 폴더 바로 아래 사진만 처리하고(하위 폴더는 `--recursive`), 촬영 시각(EXIF)을 결과에 남긴다.
+- **새 글쓰기 탭은 방송(치지직 등)이 없는 크롬 창에 연다.** `upload_to_editor.open_fresh_tab`은 `_lib/chrome_window.open_postwrite_tab`을 쓴다(2026-09-26 전에는 창 1 고정이었다).
+- 대본 없이 사진 폴더만 올리는 일은 `photo-folder-to-naver` 스킬이 맡는다.
   우하단 도현체 워터마크를 이미지 폭 비율로 넣는다. 네이버가 본문 사진을 폭 966px로
   줄여 보여주므로, 원본 크기가 제각각이어도 발행 후 같은 크기로 보인다.
   상수는 사용자 확정값이라 `--scale`은 보통 건드리지 않는다.
